@@ -1,0 +1,1408 @@
+diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/README.md project/README.md
+--- original/README.md	2026-04-29 02:43:45.000000000 +0000
++++ project/README.md	2026-06-11 10:39:56.751527558 +0000
+@@ -24,11 +24,11 @@
+ | `FORECAST_HOURS` | 预报时效，当前为 `[0, 3, 6, 9, 12]` |
+ | `PLOT_LEVELS` | 处理层次，当前为 `[500, 700, 850]` |
+ | `MAP_CONFIG` | 绘图范围、DPI、天津坐标等 |
+-| `LLM_API_KEY` | DashScope API Key |
++| `LLM_API_KEY` | 从环境变量 `DASHSCOPE_API_KEY` 读取，不再写在代码中 |
+ | `LLM_MODEL` | 当前配置模型为 `qwen3.6-plus` |
+ | `LLM_ENABLED` | 是否启用大模型位置描述 |
+ 
+-注意：当前版本的大模型配置直接写在 `settings.py` 中。分享工程或提交代码前，请务必删除或脱敏真实 API Key。
++注意：API Key 统一从环境变量 `DASHSCOPE_API_KEY` 读取，禁止写入代码。运行前设置：PowerShell `$env:DASHSCOPE_API_KEY="sk-xxx"`（永久生效走"系统设置 → 环境变量"）；Linux/macOS `export DASHSCOPE_API_KEY="sk-xxx"`。未设置时大模型自动降级为坐标描述，不影响流程。
+ 
+ ## 输出
+ 
+Binary files original/__pycache__/main.cpython-312.pyc and project/__pycache__/main.cpython-312.pyc differ
+Binary files original/config/__pycache__/__init__.cpython-312.pyc and project/config/__pycache__/__init__.cpython-312.pyc differ
+Binary files original/config/__pycache__/settings.cpython-312.pyc and project/config/__pycache__/settings.cpython-312.pyc differ
+diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/config/settings.py project/config/settings.py
+--- original/config/settings.py	2026-05-29 07:45:10.000000000 +0000
++++ project/config/settings.py	2026-06-11 05:18:50.577860288 +0000
+@@ -65,9 +65,16 @@
+     850: list(range(120, 171, 4)),   # 850hPa: 120~170, 间隔4
+ }
+ 
+-# 数据平滑参数（分离绘图和识别）
+-SMOOTH_POINTS_PLOT = 10    # 绘图用平滑点数（大一些，线更顺）
+-SMOOTH_POINTS_DETECT = 50   # 识别用平滑点数（小一些，保留细节）
++# 数据平滑参数（按用途分离，谁使用谁平滑）
++# 平滑策略约定:
++#   - Micaps4Reader.read() 默认不平滑，返回原始格网数据
++#   - 绘图模块在绘制前用 SMOOTH_POINTS_PLOT 平滑（让等值线更顺）
++#   - 识别模块在识别前用 SMOOTH_POINTS_DETECT 平滑（抑制噪声中心）
++#   两者互不叠加。修改任一数值只影响对应环节。
++# 注意: 数值越大平滑越强。当前 DETECT=50 平滑强度远大于 PLOT=10，
++#       会抹掉较小尺度的槽线/低涡，如发现漏报小系统，优先调小此值验证。
++SMOOTH_POINTS_PLOT = 10     # 绘图用平滑
++SMOOTH_POINTS_DETECT = 50   # 识别用平滑
+ 
+ # ============================================================
+ # 可视化配置
+@@ -240,10 +247,18 @@
+ # ============================================================
+ # 大模型配置
+ # ============================================================
+-LLM_API_KEY = "sk-6a2787631b044da2ae6c07335c86d89d"
++# 安全要求: API Key 一律从环境变量读取，禁止硬编码到代码中。
++# 配置方式:
++#   Windows (PowerShell):  $env:DASHSCOPE_API_KEY = "sk-xxx"
++#   Windows (永久):        系统设置 → 环境变量 → 新建 DASHSCOPE_API_KEY
++#   Linux/macOS:           export DASHSCOPE_API_KEY="sk-xxx"
++# 注意: 旧版本曾将真实 Key 写死在此文件并随工程分发，该 Key 视为已泄露，
++#       必须在 DashScope 控制台吊销后更换新 Key。
++LLM_API_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
+ LLM_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+ LLM_MODEL = "qwen3.6-plus"
+ LLM_ENABLED = True    # 设为 False 可关闭大模型，使用坐标代替省份
++LLM_TIMEOUT_SECONDS = 10   # 单次 API 调用超时（秒），防止网络问题卡死主流程
+ 
+ # ============================================================
+ # 后续扩展配置（预留）
+diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/docs/configuration.md project/docs/configuration.md
+--- original/docs/configuration.md	2026-04-29 02:43:20.000000000 +0000
++++ project/docs/configuration.md	2026-06-11 10:39:56.751785189 +0000
+@@ -68,9 +68,9 @@
+ 
+ | 参数 | 说明 |
+ |---|---|
+-| `LLM_API_KEY` | DashScope API Key |
++| `LLM_API_KEY` | 从环境变量 `DASHSCOPE_API_KEY` 读取（禁止硬编码） |
+ | `LLM_BASE_URL` | API 地址 |
+ | `LLM_MODEL` | 当前配置模型 |
+ | `LLM_ENABLED` | 是否启用大模型位置描述 |
+ 
+-当前版本中，大模型配置直接位于 `settings.py` 中。分享工程前请脱敏真实 API Key。
+\ No newline at end of file
++API Key 从环境变量 `DASHSCOPE_API_KEY` 读取，代码中不保存任何真实 Key。新增 `LLM_TIMEOUT_SECONDS`（默认10秒）控制单次调用超时。
+\ No newline at end of file
+diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/docs/known_issues.md project/docs/known_issues.md
+--- original/docs/known_issues.md	2026-04-29 02:39:45.000000000 +0000
++++ project/docs/known_issues.md	2026-06-11 10:40:23.499387555 +0000
+@@ -72,10 +72,24 @@
+ 
+ 只需修改 `modules/llm/llm_client.py`。`location_service.py` 的函数签名不变，所有调用方（`trough_analysis.py`、`vortex_analysis.py`）零改动。
+ 
+-## 21. MICAPS4 当前存在读取阶段平滑
++## 21. MICAPS4 读取阶段平滑（已修正）
+ 
+-当前 `Micaps4Reader.read()` 的默认参数为：
++历史版本 `Micaps4Reader.read()` 默认 `smooth=True, smooth_points=5`，而 `DataManager` 调用时未传参，导致数据被"读取5点 → 识别50点 → 绘图10点"三重叠加平滑，小尺度槽线/低涡可能被抹掉。
+ 
+-```python
+-smooth=True
+-smooth_points=5
+\ No newline at end of file
++**修正（2026-06）：** 读取默认改为 `smooth=False`，平滑职责下放：识别用 `SMOOTH_POINTS_DETECT`，绘图用 `SMOOTH_POINTS_PLOT`，互不叠加。调参时只动对应常量，单一变量可控。注意此修正会改变识别结果（一般是识别出更多小系统），升级后请用历史个例对比验证一轮。
++
++## 22. API Key 安全策略（2026-06 新增）
++
++`LLM_API_KEY` 从环境变量 `DASHSCOPE_API_KEY` 读取，禁止硬编码。历史版本曾将真实 Key 写入 `settings.py` 并随工程分发，该 Key 视为已泄露，必须在 DashScope 控制台吊销更换。未设置环境变量时自动降级为坐标描述，不影响流程。同时新增 `LLM_TIMEOUT_SECONDS=10` 超时与客户端复用、位置描述缓存（只缓存成功结果）。
++
++## 23. 追踪器缺测容忍（2026-06 新增）
++
++`TroughTracker` / `VortexTracker` 在单个时次识别结果为空时不再立即清空前序状态，最多容忍连续 `MAX_MISS=1` 个空时次，超过才断开轨迹。低涡速度约束的时间间隔改为按相邻有效时次 `fcst_time` 差值实际计算（跨缺测时次自动放宽），不再硬编码 3 小时。注意：槽线匹配距离阈值 `TROUGH_TRACK_DISTANCE_MAX` 未按间隔缩放，跨 6h 接轨时偏保守（宁断勿错接），如需放宽可在 update 中按间隔比例放大阈值。
++
++## 24. 实况-预报匹配一对一约束（2026-06 新增）
++
++三个 analysis 模块的 `_match_obs_with_forecast` 改为"全局收集候选 → 按距离排序 → 贪心一对一分配"，避免多条实况匹配同一轨迹导致报告重复条目。槽线匹配距离统一改用 `haversine_distance`（旧版平面近似在 40°N 高估东西向距离约 30%）。槽线/低涡轨迹首位置非 +000h 时输出 warning（提示 +000h 数据可能缺失，匹配基准偏移）。冷涡轨迹首位置晚于 +000h 属正常（配合后期才成功），不做检查。
++
++## 25. 陆地底图多部分多边形与缓存（2026-06 新增）
++
++`draw_ocean_land` 旧版每张图重读 shapefile 且只绘制每个 shape 的第一个 part（岛屿环丢失）。已改为模块级缓存坐标（磁盘只读一次）并遍历全部 parts。PatchCollection 不能跨 figure 复用，故每次重建 Polygon 对象。
+diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/main.py project/main.py
+--- original/main.py	2026-05-26 11:54:05.000000000 +0000
++++ project/main.py	2026-06-11 10:39:31.119989750 +0000
+@@ -229,7 +229,7 @@
+             level_figs["obs"] = obs_fig
+ 
+         # 预报追踪图
+-        if level == 500 and trough_tracker.tracks:
++        if level == 500 and (trough_tracker.tracks or cold_vortex_tracks):
+             fcst_fig = analysis_plotter.plot_fcst_tracking(
+                 trough_tracker, trough_tianjin_ids, level,
+                 time_label=obs_time_label or "预报",
+Binary files original/modules/__pycache__/__init__.cpython-312.pyc and project/modules/__pycache__/__init__.cpython-312.pyc differ
+Binary files original/modules/data_io/__pycache__/__init__.cpython-312.pyc and project/modules/data_io/__pycache__/__init__.cpython-312.pyc differ
+Binary files original/modules/data_io/__pycache__/data_manager.cpython-312.pyc and project/modules/data_io/__pycache__/data_manager.cpython-312.pyc differ
+Binary files original/modules/data_io/__pycache__/mdfs_wind_reader.cpython-312.pyc and project/modules/data_io/__pycache__/mdfs_wind_reader.cpython-312.pyc differ
+Binary files original/modules/data_io/__pycache__/micaps14_reader.cpython-312.pyc and project/modules/data_io/__pycache__/micaps14_reader.cpython-312.pyc differ
+Binary files original/modules/data_io/__pycache__/micaps4_reader.cpython-312.pyc and project/modules/data_io/__pycache__/micaps4_reader.cpython-312.pyc differ
+Binary files original/modules/data_io/__pycache__/time_input.cpython-312.pyc and project/modules/data_io/__pycache__/time_input.cpython-312.pyc differ
+diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/modules/data_io/micaps4_reader.py project/modules/data_io/micaps4_reader.py
+--- original/modules/data_io/micaps4_reader.py	2026-05-29 01:40:40.000000000 +0000
++++ project/modules/data_io/micaps4_reader.py	2026-06-11 05:19:00.334418296 +0000
+@@ -35,13 +35,18 @@
+     """MICAPS4 格网数据读取器"""
+ 
+     @staticmethod
+-    def read(filepath: str, smooth: bool = True, smooth_points: int = 5) -> Optional[object]:
++    def read(filepath: str, smooth: bool = False, smooth_points: int = 5) -> Optional[object]:
+         """
+         读取单个 MICAPS4 文件。
+ 
++        默认返回未平滑的原始数据。平滑由下游各环节自行负责:
++            - 识别模块使用 SMOOTH_POINTS_DETECT
++            - 绘图模块使用 SMOOTH_POINTS_PLOT
++        （历史版本默认 smooth=True 导致读取/识别/绘图三重叠加平滑，已修正）
++
+         Args:
+             filepath:      文件路径
+-            smooth:        是否对数据做平滑处理
++            smooth:        是否对数据做平滑处理（默认 False）
+             smooth_points: 平滑点数（传给 meb.comp.smooth）
+ 
+         Returns:
+Binary files original/modules/detection/__pycache__/__init__.cpython-312.pyc and project/modules/detection/__pycache__/__init__.cpython-312.pyc differ
+Binary files original/modules/detection/__pycache__/base_detector.cpython-312.pyc and project/modules/detection/__pycache__/base_detector.cpython-312.pyc differ
+Binary files original/modules/detection/__pycache__/cold_vortex.cpython-312.pyc and project/modules/detection/__pycache__/cold_vortex.cpython-312.pyc differ
+Binary files original/modules/detection/__pycache__/detector_factory.cpython-312.pyc and project/modules/detection/__pycache__/detector_factory.cpython-312.pyc differ
+Binary files original/modules/detection/__pycache__/low_level_jet.cpython-312.pyc and project/modules/detection/__pycache__/low_level_jet.cpython-312.pyc differ
+Binary files original/modules/detection/__pycache__/low_level_vortex.cpython-312.pyc and project/modules/detection/__pycache__/low_level_vortex.cpython-312.pyc differ
+Binary files original/modules/detection/__pycache__/subtropical_high.cpython-312.pyc and project/modules/detection/__pycache__/subtropical_high.cpython-312.pyc differ
+Binary files original/modules/detection/__pycache__/trough.cpython-312.pyc and project/modules/detection/__pycache__/trough.cpython-312.pyc differ
+diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/modules/detection/cold_vortex.py project/modules/detection/cold_vortex.py
+--- original/modules/detection/cold_vortex.py	2026-03-31 03:10:57.000000000 +0000
++++ project/modules/detection/cold_vortex.py	2026-06-11 10:39:56.749616754 +0000
+@@ -1,7 +1,15 @@
+ """
+ 冷涡识别器
+ ==========
+-识别 500hPa 层次的冷涡（冷中心）。
++识别 500hPa 层次的温度冷中心。
++
++命名说明:
++    本识别器单独输出的是"温度冷中心"，并非严格意义的冷涡。
++    真正的冷涡判定（GH 低压中心 + 冷中心配合，距离 ≤ 300km）在
++    modules/tracking/cold_vortex_analysis.py 中完成。
++    第一份识别报告中以"冷涡"标注的点实为冷中心，阅读时注意区分。
++    另: required_vars 声明 GH+T 是为了保证配合判断所需数据齐全，
++    本识别器 detect() 实际只使用 T。
+ 
+ 预报数据识别方式:
+     使用 metdig.cal.high_low_center() 对 T（温度场）识别冷暖中心，
+diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/modules/detection/trough.py project/modules/detection/trough.py
+--- original/modules/detection/trough.py	2026-04-09 03:01:03.000000000 +0000
++++ project/modules/detection/trough.py	2026-06-11 10:39:56.748824508 +0000
+@@ -118,7 +118,8 @@
+             }]
+ 
+             logger.info(
+-                f"预报 {level}hPa: 识别到 {len(graphy)} 条高空槽"
++                f"预报 {level}hPa: 识别到 "
++                f"{len(graphy.get('features', {}))} 条高空槽"
+             )
+             return results
+ 
+Binary files original/modules/llm/__pycache__/__init__.cpython-312.pyc and project/modules/llm/__pycache__/__init__.cpython-312.pyc differ
+Binary files original/modules/llm/__pycache__/analyzer.cpython-312.pyc and project/modules/llm/__pycache__/analyzer.cpython-312.pyc differ
+Binary files original/modules/llm/__pycache__/data_serializer.cpython-312.pyc and project/modules/llm/__pycache__/data_serializer.cpython-312.pyc differ
+Binary files original/modules/llm/__pycache__/llm_client.cpython-312.pyc and project/modules/llm/__pycache__/llm_client.cpython-312.pyc differ
+Binary files original/modules/llm/__pycache__/location_service.cpython-312.pyc and project/modules/llm/__pycache__/location_service.cpython-312.pyc differ
+diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/modules/llm/llm_client.py project/modules/llm/llm_client.py
+--- original/modules/llm/llm_client.py	2026-04-27 15:04:54.000000000 +0000
++++ project/modules/llm/llm_client.py	2026-06-11 10:39:31.121423296 +0000
+@@ -8,6 +8,25 @@
+ 
+ logger = logging.getLogger(__name__)
+ 
++_client = None
++
++
++def _get_client():
++    """惰性创建并复用 OpenAI 客户端（带超时），避免每次调用重建连接"""
++    global _client
++    if _client is None:
++        from openai import OpenAI
++        from config.settings import (
++            LLM_API_KEY, LLM_BASE_URL, LLM_TIMEOUT_SECONDS,
++        )
++        _client = OpenAI(
++            api_key=LLM_API_KEY,
++            base_url=LLM_BASE_URL,
++            timeout=LLM_TIMEOUT_SECONDS,   # 防止网络问题卡死主流程
++            max_retries=1,
++        )
++    return _client
++
+ 
+ def call_llm(prompt: str, system_prompt: str = None) -> Optional[str]:
+     """
+@@ -30,12 +49,7 @@
+         return None
+ 
+     try:
+-        from openai import OpenAI
+-
+-        client = OpenAI(
+-            api_key=LLM_API_KEY,
+-            base_url=LLM_BASE_URL,
+-        )
++        client = _get_client()
+ 
+         messages = []
+         if system_prompt:
+diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/modules/llm/location_service.py project/modules/llm/location_service.py
+--- original/modules/llm/location_service.py	2026-04-27 15:07:55.000000000 +0000
++++ project/modules/llm/location_service.py	2026-06-11 10:39:31.122359576 +0000
+@@ -13,6 +13,10 @@
+ 
+ logger = logging.getLogger(__name__)
+ 
++# 位置描述缓存: {(round(lon,1), round(lat,1)): 描述文本}
++# 同一系统在分析和报告阶段会重复查询同一坐标，缓存避免重复调用 API
++_location_cache = {}
++
+ SYSTEM_PROMPT = """你是一个地理位置助手。用户给你中国范围内的经纬度坐标，你需要判断这些坐标位于哪个省份（或自治区），以及相对于该省份的大致方位（东部/南部/西部/北部/中部）。
+ 
+ 要求：
+@@ -44,6 +48,11 @@
+     center_lon = sum(c[0] for c in coords) / len(coords)
+     center_lat = sum(c[1] for c in coords) / len(coords)
+ 
++    # 命中缓存直接返回
++    cache_key = (round(center_lon, 1), round(center_lat, 1))
++    if cache_key in _location_cache:
++        return _location_cache[cache_key]
++
+     # 构建 prompt
+     if len(coords) == 1:
+         prompt = f"{system_type}中心位于经度{center_lon:.1f}°E，纬度{center_lat:.1f}°N，请判断位于哪个省份的什么方位。"
+@@ -58,6 +67,8 @@
+     result = call_llm(prompt, SYSTEM_PROMPT)
+ 
+     if result:
++        # 仅缓存成功结果；失败不缓存，避免一次网络抖动钉死整轮降级
++        _location_cache[cache_key] = result
+         return result
+     else:
+         # 降级：返回坐标描述
+Binary files original/modules/report/__pycache__/__init__.cpython-312.pyc and project/modules/report/__pycache__/__init__.cpython-312.pyc differ
+Binary files original/modules/report/__pycache__/analysis_report.cpython-312.pyc and project/modules/report/__pycache__/analysis_report.cpython-312.pyc differ
+Binary files original/modules/report/__pycache__/word_generator.cpython-312.pyc and project/modules/report/__pycache__/word_generator.cpython-312.pyc differ
+diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/modules/report/word_generator.py project/modules/report/word_generator.py
+--- original/modules/report/word_generator.py	2026-03-30 12:25:23.000000000 +0000
++++ project/modules/report/word_generator.py	2026-06-11 10:39:56.751080912 +0000
+@@ -50,7 +50,7 @@
+         os.makedirs(REPORT_DIR, exist_ok=True)
+ 
+     def generate(
+-        self, figure_paths: Dict[Tuple[str, str, int], Tuple[str, str]]
++        self, figure_paths: Dict[Tuple[str, str, int], Tuple[str, str, str]]
+     ) -> str:
+         """
+         生成 Word 报告。
+@@ -58,7 +58,7 @@
+         Args:
+             figure_paths: 图片路径字典
+                 key:   (data_type, time_label, level)
+-                value: (field_fig_path, system_fig_path)
++                value: (field_fig_path, system_fig_path, system_names)
+ 
+         Returns:
+             生成的 Word 文件路径
+Binary files original/modules/tracking/__pycache__/__init__.cpython-312.pyc and project/modules/tracking/__pycache__/__init__.cpython-312.pyc differ
+Binary files original/modules/tracking/__pycache__/base_tracker.cpython-312.pyc and project/modules/tracking/__pycache__/base_tracker.cpython-312.pyc differ
+Binary files original/modules/tracking/__pycache__/cold_vortex_analysis.cpython-312.pyc and project/modules/tracking/__pycache__/cold_vortex_analysis.cpython-312.pyc differ
+Binary files original/modules/tracking/__pycache__/match_strategy.cpython-312.pyc and project/modules/tracking/__pycache__/match_strategy.cpython-312.pyc differ
+Binary files original/modules/tracking/__pycache__/subtropical_high_analysis.cpython-312.pyc and project/modules/tracking/__pycache__/subtropical_high_analysis.cpython-312.pyc differ
+Binary files original/modules/tracking/__pycache__/tracker.cpython-312.pyc and project/modules/tracking/__pycache__/tracker.cpython-312.pyc differ
+Binary files original/modules/tracking/__pycache__/trough_analysis.cpython-312.pyc and project/modules/tracking/__pycache__/trough_analysis.cpython-312.pyc differ
+Binary files original/modules/tracking/__pycache__/trough_tracker.cpython-312.pyc and project/modules/tracking/__pycache__/trough_tracker.cpython-312.pyc differ
+Binary files original/modules/tracking/__pycache__/vortex_analysis.cpython-312.pyc and project/modules/tracking/__pycache__/vortex_analysis.cpython-312.pyc differ
+Binary files original/modules/tracking/__pycache__/vortex_tracker.cpython-312.pyc and project/modules/tracking/__pycache__/vortex_tracker.cpython-312.pyc differ
+diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/modules/tracking/cold_vortex_analysis.py project/modules/tracking/cold_vortex_analysis.py
+--- original/modules/tracking/cold_vortex_analysis.py	2026-04-28 06:52:27.000000000 +0000
++++ project/modules/tracking/cold_vortex_analysis.py	2026-06-11 10:39:07.146924823 +0000
+@@ -497,14 +497,15 @@
+ def _match_obs_with_forecast(
+     obs_vortices: List[Dict], vortex_tracks: List[Dict]
+ ) -> Tuple[List, set]:
+-    """实况冷涡与预报冷涡轨迹匹配"""
+-    matched = []
+-    matched_ids = set()
+-
+-    for obs in obs_vortices:
+-        best_id = None
+-        best_dist = float("inf")
++    """
++    实况冷涡与预报冷涡轨迹匹配（全局一对一）。
+ 
++    注意：冷涡轨迹首位置可能晚于 +000h（低压与冷中心后期才配合成功），
++    属正常情况，此处不做 .000 检查。
++    """
++    # 1. 收集所有阈值内的 (距离, obs序号, vortex_id) 候选
++    candidates = []
++    for oi, obs in enumerate(obs_vortices):
+         for vt in vortex_tracks:
+             positions = vt.get("positions", [])
+             if not positions:
+@@ -513,13 +514,20 @@
+             dist = haversine_distance(
+                 obs["lon"], obs["lat"], first["lon"], first["lat"]
+             )
+-            if dist < best_dist:
+-                best_dist = dist
+-                best_id = vt["vortex_id"]
++            if dist <= COLD_VORTEX_MATCH_DISTANCE:
++                candidates.append((dist, oi, vt["vortex_id"]))
+ 
+-        if best_id is not None and best_dist <= COLD_VORTEX_MATCH_DISTANCE:
+-            matched.append((obs, best_id, best_dist))
+-            matched_ids.add(best_id)
++    # 2. 按距离从近到远贪心一对一分配
++    candidates.sort()
++    matched = []
++    matched_ids = set()
++    used_obs = set()
++    for dist, oi, vortex_id in candidates:
++        if oi in used_obs or vortex_id in matched_ids:
++            continue
++        matched.append((obs_vortices[oi], vortex_id, dist))
++        matched_ids.add(vortex_id)
++        used_obs.add(oi)
+ 
+     return matched, matched_ids
+ 
+diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/modules/tracking/trough_analysis.py project/modules/tracking/trough_analysis.py
+--- original/modules/tracking/trough_analysis.py	2026-04-28 06:25:58.000000000 +0000
++++ project/modules/tracking/trough_analysis.py	2026-06-11 10:39:07.145432076 +0000
+@@ -13,7 +13,7 @@
+ from modules.tracking.trough_tracker import TroughTracker
+ from utils.geo_utils import (
+     calculate_center, judge_trough_tilt, calculate_impact_time,
+-    get_direction_from_vector, get_opposite_direction,
++    get_direction_from_vector, get_opposite_direction, haversine_distance,
+ )
+ from config.settings import TIANJIN_RANGE, TROUGH_MATCH_DISTANCE_THRESHOLD
+ 
+@@ -140,33 +140,48 @@
+ def _match_obs_with_forecast(
+     obs_troughs: List[Dict], tracker: TroughTracker
+ ) -> Tuple[List, set]:
+-    """实况槽线与预报追踪轨迹匹配"""
++    """
++    实况槽线与预报追踪轨迹匹配（球面距离 + 全局一对一）。
++
++    旧版逐条找最近会出现多条实况匹配同一轨迹（报告重复条目），
++    且使用不带 cos(lat) 的平面近似（40°N 处东西向距离高估约 30%）。
++    """
++    # 预提取各轨迹首位置（正常应为 +000h 时次）
++    track_firsts = []
++    for track_id, troughs in tracker.tracks.items():
++        if not troughs:
++            continue
++        first = troughs[0]
++        if first.get("time_str") != ".000":
++            logger.warning(
++                f"槽线轨迹{track_id}首位置非+000h"
++                f"({first.get('time_str')})，匹配距离可能偏移"
++            )
++        track_firsts.append((track_id, first))
++
++    # 1. 收集所有阈值内的 (距离, obs序号, track_id) 候选
++    candidates = []
++    for oi, obs_item in enumerate(obs_troughs):
++        obs_center = calculate_center(obs_item["geometry"]["points"])
++        for track_id, first in track_firsts:
++            dist = haversine_distance(
++                obs_center[0], obs_center[1],
++                first["center_lon"], first["center_lat"],
++            )
++            if dist <= TROUGH_MATCH_DISTANCE_THRESHOLD:
++                candidates.append((dist, oi, track_id))
++
++    # 2. 按距离从近到远贪心一对一分配
++    candidates.sort()
+     matched_pairs = []
+     matched_track_ids = set()
+-
+-    for obs_item in obs_troughs:
+-        points = obs_item["geometry"]["points"]
+-        obs_center = calculate_center(points)
+-
+-        best_track_id = None
+-        best_distance = float("inf")
+-
+-        for track_id, troughs in tracker.tracks.items():
+-            if not troughs:
+-                continue
+-            first = troughs[0]
+-            dist = np.sqrt(
+-                (obs_center[0] - first["center_lon"]) ** 2
+-                + (obs_center[1] - first["center_lat"]) ** 2
+-            ) * 111
+-
+-            if dist < best_distance:
+-                best_distance = dist
+-                best_track_id = track_id
+-
+-        if best_track_id and best_distance <= TROUGH_MATCH_DISTANCE_THRESHOLD:
+-            matched_pairs.append((obs_item, best_track_id, best_distance))
+-            matched_track_ids.add(best_track_id)
++    used_obs = set()
++    for dist, oi, track_id in candidates:
++        if oi in used_obs or track_id in matched_track_ids:
++            continue
++        matched_pairs.append((obs_troughs[oi], track_id, dist))
++        matched_track_ids.add(track_id)
++        used_obs.add(oi)
+ 
+     return matched_pairs, matched_track_ids
+ 
+diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/modules/tracking/trough_tracker.py project/modules/tracking/trough_tracker.py
+--- original/modules/tracking/trough_tracker.py	2026-04-09 02:51:51.000000000 +0000
++++ project/modules/tracking/trough_tracker.py	2026-06-11 10:39:56.749795636 +0000
+@@ -53,6 +53,8 @@
+         feature = {
+             "center_lon": center.get("lon", 0),
+             "center_lat": center.get("lat", 0),
++            # 注意: "lenght" 是 metdig 返回结果的原始字段名（上游拼写如此），
++            # 切勿"修正"为 "length"，否则所有槽线长度都会变成 0
+             "length": axes.get("lenght", 0),
+             "strength": region.get("strength", 0),
+             "points": points,
+@@ -122,6 +124,8 @@
+         super().__init__()
+         self._prev_features: List[Dict] = []
+         self._prev_feature_to_track: Dict[int, int] = {}
++        self._miss_count: int = 0
++        self.MAX_MISS: int = 1   # 最多容忍连续 1 个空时次，超过才断开轨迹
+ 
+     def update(self, caldata, time_str: str, fcst_time=None):
+         """
+@@ -135,10 +139,15 @@
+         curr_features = extract_trough_features(caldata)
+ 
+         if not curr_features:
+-            self._prev_features = []
+-            self._prev_feature_to_track = {}
++            # 单个时次缺测/无槽线不立即断轨，容忍 MAX_MISS 个空时次
++            self._miss_count += 1
++            if self._miss_count > self.MAX_MISS:
++                self._prev_features = []
++                self._prev_feature_to_track = {}
+             return
+ 
++        self._miss_count = 0
++
+         if not self._prev_features:
+             # 第一个时次，每条槽线新建轨迹
+             new_mapping = {}
+diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/modules/tracking/vortex_analysis.py project/modules/tracking/vortex_analysis.py
+--- original/modules/tracking/vortex_analysis.py	2026-04-28 06:35:53.000000000 +0000
++++ project/modules/tracking/vortex_analysis.py	2026-06-11 10:39:07.146669488 +0000
+@@ -198,32 +198,43 @@
+ def _match_obs_with_forecast(
+     obs_vortices: List[Dict], tracker: VortexTracker
+ ) -> Tuple[List, set]:
+-    """实况低涡与预报追踪轨迹匹配"""
+-    matched_pairs = []
+-    matched_track_ids = set()
++    """实况低涡与预报追踪轨迹匹配（全局一对一）"""
++    # 预提取各轨迹首位置（正常应为 +000h 时次）
++    track_firsts = []
++    for track_id, vortices in tracker.tracks.items():
++        if not vortices:
++            continue
++        first = vortices[0]
++        if first.get("time_str") != ".000":
++            logger.warning(
++                f"低涡轨迹{track_id}首位置非+000h"
++                f"({first.get('time_str')})，匹配距离可能偏移"
++            )
++        track_firsts.append((track_id, first))
+ 
+-    for obs_item in obs_vortices:
++    # 1. 收集所有阈值内的 (距离, obs序号, track_id) 候选
++    candidates = []
++    for oi, obs_item in enumerate(obs_vortices):
+         geo = obs_item["geometry"]
+         obs_lon, obs_lat = geo["lon"], geo["lat"]
+-
+-        best_track_id = None
+-        best_distance = float("inf")
+-
+-        for track_id, vortices in tracker.tracks.items():
+-            if not vortices:
+-                continue
+-            first = vortices[0]
++        for track_id, first in track_firsts:
+             dist = haversine_distance(
+                 obs_lon, obs_lat, first["lon"], first["lat"]
+             )
++            if dist <= VORTEX_MATCH_DISTANCE_THRESHOLD:
++                candidates.append((dist, oi, track_id))
+ 
+-            if dist < best_distance:
+-                best_distance = dist
+-                best_track_id = track_id
+-
+-        if best_track_id and best_distance <= VORTEX_MATCH_DISTANCE_THRESHOLD:
+-            matched_pairs.append((obs_item, best_track_id, best_distance))
+-            matched_track_ids.add(best_track_id)
++    # 2. 按距离从近到远贪心一对一分配
++    candidates.sort()
++    matched_pairs = []
++    matched_track_ids = set()
++    used_obs = set()
++    for dist, oi, track_id in candidates:
++        if oi in used_obs or track_id in matched_track_ids:
++            continue
++        matched_pairs.append((obs_vortices[oi], track_id, dist))
++        matched_track_ids.add(track_id)
++        used_obs.add(oi)
+ 
+     return matched_pairs, matched_track_ids
+ 
+diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/modules/tracking/vortex_tracker.py project/modules/tracking/vortex_tracker.py
+--- original/modules/tracking/vortex_tracker.py	2026-04-23 01:40:16.000000000 +0000
++++ project/modules/tracking/vortex_tracker.py	2026-06-11 10:38:33.451507573 +0000
+@@ -43,6 +43,9 @@
+         super().__init__()
+         self._prev_vortices: List[Dict] = []
+         self._prev_vortex_to_track: Dict[int, int] = {}
++        self._prev_fcst_time = None   # 上一有效时次的预报时间
++        self._miss_count: int = 0
++        self.MAX_MISS: int = 1        # 最多容忍连续 1 个空时次
+ 
+     def update(self, detection_results: List[Dict], time_str: str, fcst_time=None):
+         """
+@@ -72,10 +75,16 @@
+             })
+ 
+         if not curr_vortices:
+-            self._prev_vortices = []
+-            self._prev_vortex_to_track = {}
++            # 单个时次缺测不立即断轨，容忍 MAX_MISS 个空时次
++            self._miss_count += 1
++            if self._miss_count > self.MAX_MISS:
++                self._prev_vortices = []
++                self._prev_vortex_to_track = {}
++                self._prev_fcst_time = None
+             return
+ 
++        self._miss_count = 0
++
+         if not self._prev_vortices:
+             # 第一个时次，每个低涡新建轨迹
+             new_mapping = {}
+@@ -86,11 +95,20 @@
+                 new_mapping[i] = track_id
+             self._prev_vortices = curr_vortices
+             self._prev_vortex_to_track = new_mapping
++            self._prev_fcst_time = fcst_time
+             return
+ 
++        # 计算与上一有效时次的实际时间间隔（小时）。
++        # 跨过缺测时次时间隔自动变大，速度约束随之放宽，不再硬编码 3h
++        time_hours = 3.0
++        if fcst_time is not None and self._prev_fcst_time is not None:
++            delta = (fcst_time - self._prev_fcst_time).total_seconds() / 3600.0
++            if delta > 0:
++                time_hours = delta
++
+         # 匈牙利算法匹配
+         matches, new_indices, _ = self._hungarian_match(
+-            self._prev_vortices, curr_vortices
++            self._prev_vortices, curr_vortices, time_hours=time_hours
+         )
+ 
+         new_mapping = {}
+@@ -111,6 +129,7 @@
+ 
+         self._prev_vortices = curr_vortices
+         self._prev_vortex_to_track = new_mapping
++        self._prev_fcst_time = fcst_time
+ 
+     def get_tianjin_tracks(self, tianjin_range: dict) -> List[int]:
+         """
+Binary files original/modules/visualization/__pycache__/__init__.cpython-312.pyc and project/modules/visualization/__pycache__/__init__.cpython-312.pyc differ
+Binary files original/modules/visualization/__pycache__/analysis_plotter.cpython-312.pyc and project/modules/visualization/__pycache__/analysis_plotter.cpython-312.pyc differ
+Binary files original/modules/visualization/__pycache__/field_plotter.cpython-312.pyc and project/modules/visualization/__pycache__/field_plotter.cpython-312.pyc differ
+Binary files original/modules/visualization/__pycache__/system_plotter.cpython-312.pyc and project/modules/visualization/__pycache__/system_plotter.cpython-312.pyc differ
+diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/modules/visualization/system_plotter.py project/modules/visualization/system_plotter.py
+--- original/modules/visualization/system_plotter.py	2026-05-29 07:46:07.000000000 +0000
++++ project/modules/visualization/system_plotter.py	2026-06-11 10:39:31.122850548 +0000
+@@ -177,24 +177,41 @@
+ )
+ 
+ 
++_land_polygons_cache = None
++
++
++def _load_land_polygons():
++    """读取陆地 shapefile（含全部 parts），模块级缓存，磁盘只读一次"""
++    global _land_polygons_cache
++    if _land_polygons_cache is None:
++        sf = shp.Reader(_land_shp)
++        polys = []
++        for shape in sf.shapes():
++            parts = list(shape.parts) + [len(shape.points)]
++            # 遍历该 shape 的所有 part（多部分多边形：大陆 + 岛屿）。
++            # 旧版只取 parts[0]:parts[1]，岛屿环全部丢失
++            for k in range(len(parts) - 1):
++                pts = shape.points[parts[k]:parts[k + 1]]
++                if len(pts) >= 3:
++                    polys.append(pts)
++        _land_polygons_cache = polys
++    return _land_polygons_cache
++
++
+ def draw_ocean_land(ax, map_config=None):
+     """
+     绘制海洋蓝色背景和陆地填充，区分海陆边界。
+ 
++    陆地多边形坐标首次调用时读取并缓存；PatchCollection 不能跨
++    figure 复用，因此每次重建 Polygon 对象（很廉价），磁盘只读一次。
++
+     Args:
+         ax:         matplotlib axes
+         map_config: MapConfig（可选，未使用）
+     """
+     ax.set_facecolor('#A8D4F0')
+ 
+-    sf = shp.Reader(_land_shp)
+-    patches = []
+-    for shape in sf.shapes():
+-        parts = list(shape.parts) + [len(shape.points)]
+-        points = shape.points[parts[0]:parts[1]]
+-        if len(points) >= 3:
+-            patches.append(Polygon(points, closed=True))
+-
++    patches = [Polygon(p, closed=True) for p in _load_land_polygons()]
+     if patches:
+         pc = PatchCollection(
+             patches, facecolor='white', edgecolor='none', zorder=1
+Binary files original/utils/__pycache__/__init__.cpython-312.pyc and project/utils/__pycache__/__init__.cpython-312.pyc differ
+Binary files original/utils/__pycache__/geo_utils.cpython-312.pyc and project/utils/__pycache__/geo_utils.cpython-312.pyc differ
+Binary files original/utils/__pycache__/path_builder.cpython-312.pyc and project/utils/__pycache__/path_builder.cpython-312.pyc differ
+diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/utils/path_builder.py project/utils/path_builder.py
+--- original/utils/path_builder.py	2026-05-29 01:38:32.000000000 +0000
++++ project/utils/path_builder.py	2026-06-11 10:39:56.750543292 +0000
+@@ -5,7 +5,7 @@
+ 
+ 路径规则:
+     MICAPS4:  {root}/{YYYYMMDD}/{model}/{variable}/{level}/{YYMMDDhh}.{FFF}
+-    MICAPS14: {root}/{YYYYMMDD}/UPPER_AIR/MANUAL_ANALYSIS/{variable}/{level}/{YYYYMMDDHHmmss}.000
++    MICAPS14: {root}/{YYYY}/{YYYYMMDD}/UPPER_AIR/MANUAL_ANALYSIS/{variable}/{level}/{YYYYMMDDHHmmss}.000
+ """
+ import os
+ from datetime import datetime, timedelta
+@@ -65,7 +65,7 @@
+     示例:
+         >>> build_micaps14_path("/data/UPPER_AIR", "HGT", 500,
+         ...                     datetime(2025,6,1,8))
+-        "/data/UPPER_AIR/20250601/UPPER_AIR/MANUAL_ANALYSIS/HGT/500/20250601080000.000"
++        "/data/UPPER_AIR/2025/20250601/UPPER_AIR/MANUAL_ANALYSIS/HGT/500/20250601080000.000"
+     """
+     year_dir = obs_time.strftime("%Y")
+     date_dir = obs_time.strftime("%Y%m%d")
+diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' "original/\344\277\256\346\224\271\345\206\205\345\256\271.diff" "project/\344\277\256\346\224\271\345\206\205\345\256\271.diff"
+--- "original/\344\277\256\346\224\271\345\206\205\345\256\271.diff"	1970-01-01 00:00:00.000000000 +0000
++++ "project/\344\277\256\346\224\271\345\206\205\345\256\271.diff"	2026-06-11 10:42:27.029906837 +0000
+@@ -0,0 +1,702 @@
++diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/README.md project/README.md
++--- original/README.md	2026-04-29 02:43:45.000000000 +0000
+++++ project/README.md	2026-06-11 10:39:56.751527558 +0000
++@@ -24,11 +24,11 @@
++ | `FORECAST_HOURS` | 预报时效，当前为 `[0, 3, 6, 9, 12]` |
++ | `PLOT_LEVELS` | 处理层次，当前为 `[500, 700, 850]` |
++ | `MAP_CONFIG` | 绘图范围、DPI、天津坐标等 |
++-| `LLM_API_KEY` | DashScope API Key |
+++| `LLM_API_KEY` | 从环境变量 `DASHSCOPE_API_KEY` 读取，不再写在代码中 |
++ | `LLM_MODEL` | 当前配置模型为 `qwen3.6-plus` |
++ | `LLM_ENABLED` | 是否启用大模型位置描述 |
++ 
++-注意：当前版本的大模型配置直接写在 `settings.py` 中。分享工程或提交代码前，请务必删除或脱敏真实 API Key。
+++注意：API Key 统一从环境变量 `DASHSCOPE_API_KEY` 读取，禁止写入代码。运行前设置：PowerShell `$env:DASHSCOPE_API_KEY="sk-xxx"`（永久生效走"系统设置 → 环境变量"）；Linux/macOS `export DASHSCOPE_API_KEY="sk-xxx"`。未设置时大模型自动降级为坐标描述，不影响流程。
++ 
++ ## 输出
++ 
++Binary files original/__pycache__/main.cpython-312.pyc and project/__pycache__/main.cpython-312.pyc differ
++Binary files original/config/__pycache__/__init__.cpython-312.pyc and project/config/__pycache__/__init__.cpython-312.pyc differ
++Binary files original/config/__pycache__/settings.cpython-312.pyc and project/config/__pycache__/settings.cpython-312.pyc differ
++diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/config/settings.py project/config/settings.py
++--- original/config/settings.py	2026-05-29 07:45:10.000000000 +0000
+++++ project/config/settings.py	2026-06-11 05:18:50.577860288 +0000
++@@ -65,9 +65,16 @@
++     850: list(range(120, 171, 4)),   # 850hPa: 120~170, 间隔4
++ }
++ 
++-# 数据平滑参数（分离绘图和识别）
++-SMOOTH_POINTS_PLOT = 10    # 绘图用平滑点数（大一些，线更顺）
++-SMOOTH_POINTS_DETECT = 50   # 识别用平滑点数（小一些，保留细节）
+++# 数据平滑参数（按用途分离，谁使用谁平滑）
+++# 平滑策略约定:
+++#   - Micaps4Reader.read() 默认不平滑，返回原始格网数据
+++#   - 绘图模块在绘制前用 SMOOTH_POINTS_PLOT 平滑（让等值线更顺）
+++#   - 识别模块在识别前用 SMOOTH_POINTS_DETECT 平滑（抑制噪声中心）
+++#   两者互不叠加。修改任一数值只影响对应环节。
+++# 注意: 数值越大平滑越强。当前 DETECT=50 平滑强度远大于 PLOT=10，
+++#       会抹掉较小尺度的槽线/低涡，如发现漏报小系统，优先调小此值验证。
+++SMOOTH_POINTS_PLOT = 10     # 绘图用平滑
+++SMOOTH_POINTS_DETECT = 50   # 识别用平滑
++ 
++ # ============================================================
++ # 可视化配置
++@@ -240,10 +247,18 @@
++ # ============================================================
++ # 大模型配置
++ # ============================================================
++-LLM_API_KEY = "sk-6a2787631b044da2ae6c07335c86d89d"
+++# 安全要求: API Key 一律从环境变量读取，禁止硬编码到代码中。
+++# 配置方式:
+++#   Windows (PowerShell):  $env:DASHSCOPE_API_KEY = "sk-xxx"
+++#   Windows (永久):        系统设置 → 环境变量 → 新建 DASHSCOPE_API_KEY
+++#   Linux/macOS:           export DASHSCOPE_API_KEY="sk-xxx"
+++# 注意: 旧版本曾将真实 Key 写死在此文件并随工程分发，该 Key 视为已泄露，
+++#       必须在 DashScope 控制台吊销后更换新 Key。
+++LLM_API_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
++ LLM_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
++ LLM_MODEL = "qwen3.6-plus"
++ LLM_ENABLED = True    # 设为 False 可关闭大模型，使用坐标代替省份
+++LLM_TIMEOUT_SECONDS = 10   # 单次 API 调用超时（秒），防止网络问题卡死主流程
++ 
++ # ============================================================
++ # 后续扩展配置（预留）
++diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/docs/configuration.md project/docs/configuration.md
++--- original/docs/configuration.md	2026-04-29 02:43:20.000000000 +0000
+++++ project/docs/configuration.md	2026-06-11 10:39:56.751785189 +0000
++@@ -68,9 +68,9 @@
++ 
++ | 参数 | 说明 |
++ |---|---|
++-| `LLM_API_KEY` | DashScope API Key |
+++| `LLM_API_KEY` | 从环境变量 `DASHSCOPE_API_KEY` 读取（禁止硬编码） |
++ | `LLM_BASE_URL` | API 地址 |
++ | `LLM_MODEL` | 当前配置模型 |
++ | `LLM_ENABLED` | 是否启用大模型位置描述 |
++ 
++-当前版本中，大模型配置直接位于 `settings.py` 中。分享工程前请脱敏真实 API Key。
++\ No newline at end of file
+++API Key 从环境变量 `DASHSCOPE_API_KEY` 读取，代码中不保存任何真实 Key。新增 `LLM_TIMEOUT_SECONDS`（默认10秒）控制单次调用超时。
++\ No newline at end of file
++diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/docs/known_issues.md project/docs/known_issues.md
++--- original/docs/known_issues.md	2026-04-29 02:39:45.000000000 +0000
+++++ project/docs/known_issues.md	2026-06-11 10:40:23.499387555 +0000
++@@ -72,10 +72,24 @@
++ 
++ 只需修改 `modules/llm/llm_client.py`。`location_service.py` 的函数签名不变，所有调用方（`trough_analysis.py`、`vortex_analysis.py`）零改动。
++ 
++-## 21. MICAPS4 当前存在读取阶段平滑
+++## 21. MICAPS4 读取阶段平滑（已修正）
++ 
++-当前 `Micaps4Reader.read()` 的默认参数为：
+++历史版本 `Micaps4Reader.read()` 默认 `smooth=True, smooth_points=5`，而 `DataManager` 调用时未传参，导致数据被"读取5点 → 识别50点 → 绘图10点"三重叠加平滑，小尺度槽线/低涡可能被抹掉。
++ 
++-```python
++-smooth=True
++-smooth_points=5
++\ No newline at end of file
+++**修正（2026-06）：** 读取默认改为 `smooth=False`，平滑职责下放：识别用 `SMOOTH_POINTS_DETECT`，绘图用 `SMOOTH_POINTS_PLOT`，互不叠加。调参时只动对应常量，单一变量可控。注意此修正会改变识别结果（一般是识别出更多小系统），升级后请用历史个例对比验证一轮。
+++
+++## 22. API Key 安全策略（2026-06 新增）
+++
+++`LLM_API_KEY` 从环境变量 `DASHSCOPE_API_KEY` 读取，禁止硬编码。历史版本曾将真实 Key 写入 `settings.py` 并随工程分发，该 Key 视为已泄露，必须在 DashScope 控制台吊销更换。未设置环境变量时自动降级为坐标描述，不影响流程。同时新增 `LLM_TIMEOUT_SECONDS=10` 超时与客户端复用、位置描述缓存（只缓存成功结果）。
+++
+++## 23. 追踪器缺测容忍（2026-06 新增）
+++
+++`TroughTracker` / `VortexTracker` 在单个时次识别结果为空时不再立即清空前序状态，最多容忍连续 `MAX_MISS=1` 个空时次，超过才断开轨迹。低涡速度约束的时间间隔改为按相邻有效时次 `fcst_time` 差值实际计算（跨缺测时次自动放宽），不再硬编码 3 小时。注意：槽线匹配距离阈值 `TROUGH_TRACK_DISTANCE_MAX` 未按间隔缩放，跨 6h 接轨时偏保守（宁断勿错接），如需放宽可在 update 中按间隔比例放大阈值。
+++
+++## 24. 实况-预报匹配一对一约束（2026-06 新增）
+++
+++三个 analysis 模块的 `_match_obs_with_forecast` 改为"全局收集候选 → 按距离排序 → 贪心一对一分配"，避免多条实况匹配同一轨迹导致报告重复条目。槽线匹配距离统一改用 `haversine_distance`（旧版平面近似在 40°N 高估东西向距离约 30%）。槽线/低涡轨迹首位置非 +000h 时输出 warning（提示 +000h 数据可能缺失，匹配基准偏移）。冷涡轨迹首位置晚于 +000h 属正常（配合后期才成功），不做检查。
+++
+++## 25. 陆地底图多部分多边形与缓存（2026-06 新增）
+++
+++`draw_ocean_land` 旧版每张图重读 shapefile 且只绘制每个 shape 的第一个 part（岛屿环丢失）。已改为模块级缓存坐标（磁盘只读一次）并遍历全部 parts。PatchCollection 不能跨 figure 复用，故每次重建 Polygon 对象。
++diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/main.py project/main.py
++--- original/main.py	2026-05-26 11:54:05.000000000 +0000
+++++ project/main.py	2026-06-11 10:39:31.119989750 +0000
++@@ -229,7 +229,7 @@
++             level_figs["obs"] = obs_fig
++ 
++         # 预报追踪图
++-        if level == 500 and trough_tracker.tracks:
+++        if level == 500 and (trough_tracker.tracks or cold_vortex_tracks):
++             fcst_fig = analysis_plotter.plot_fcst_tracking(
++                 trough_tracker, trough_tianjin_ids, level,
++                 time_label=obs_time_label or "预报",
++Binary files original/modules/__pycache__/__init__.cpython-312.pyc and project/modules/__pycache__/__init__.cpython-312.pyc differ
++Binary files original/modules/data_io/__pycache__/__init__.cpython-312.pyc and project/modules/data_io/__pycache__/__init__.cpython-312.pyc differ
++Binary files original/modules/data_io/__pycache__/data_manager.cpython-312.pyc and project/modules/data_io/__pycache__/data_manager.cpython-312.pyc differ
++Binary files original/modules/data_io/__pycache__/mdfs_wind_reader.cpython-312.pyc and project/modules/data_io/__pycache__/mdfs_wind_reader.cpython-312.pyc differ
++Binary files original/modules/data_io/__pycache__/micaps14_reader.cpython-312.pyc and project/modules/data_io/__pycache__/micaps14_reader.cpython-312.pyc differ
++Binary files original/modules/data_io/__pycache__/micaps4_reader.cpython-312.pyc and project/modules/data_io/__pycache__/micaps4_reader.cpython-312.pyc differ
++Binary files original/modules/data_io/__pycache__/time_input.cpython-312.pyc and project/modules/data_io/__pycache__/time_input.cpython-312.pyc differ
++diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/modules/data_io/micaps4_reader.py project/modules/data_io/micaps4_reader.py
++--- original/modules/data_io/micaps4_reader.py	2026-05-29 01:40:40.000000000 +0000
+++++ project/modules/data_io/micaps4_reader.py	2026-06-11 05:19:00.334418296 +0000
++@@ -35,13 +35,18 @@
++     """MICAPS4 格网数据读取器"""
++ 
++     @staticmethod
++-    def read(filepath: str, smooth: bool = True, smooth_points: int = 5) -> Optional[object]:
+++    def read(filepath: str, smooth: bool = False, smooth_points: int = 5) -> Optional[object]:
++         """
++         读取单个 MICAPS4 文件。
++ 
+++        默认返回未平滑的原始数据。平滑由下游各环节自行负责:
+++            - 识别模块使用 SMOOTH_POINTS_DETECT
+++            - 绘图模块使用 SMOOTH_POINTS_PLOT
+++        （历史版本默认 smooth=True 导致读取/识别/绘图三重叠加平滑，已修正）
+++
++         Args:
++             filepath:      文件路径
++-            smooth:        是否对数据做平滑处理
+++            smooth:        是否对数据做平滑处理（默认 False）
++             smooth_points: 平滑点数（传给 meb.comp.smooth）
++ 
++         Returns:
++Binary files original/modules/detection/__pycache__/__init__.cpython-312.pyc and project/modules/detection/__pycache__/__init__.cpython-312.pyc differ
++Binary files original/modules/detection/__pycache__/base_detector.cpython-312.pyc and project/modules/detection/__pycache__/base_detector.cpython-312.pyc differ
++Binary files original/modules/detection/__pycache__/cold_vortex.cpython-312.pyc and project/modules/detection/__pycache__/cold_vortex.cpython-312.pyc differ
++Binary files original/modules/detection/__pycache__/detector_factory.cpython-312.pyc and project/modules/detection/__pycache__/detector_factory.cpython-312.pyc differ
++Binary files original/modules/detection/__pycache__/low_level_jet.cpython-312.pyc and project/modules/detection/__pycache__/low_level_jet.cpython-312.pyc differ
++Binary files original/modules/detection/__pycache__/low_level_vortex.cpython-312.pyc and project/modules/detection/__pycache__/low_level_vortex.cpython-312.pyc differ
++Binary files original/modules/detection/__pycache__/subtropical_high.cpython-312.pyc and project/modules/detection/__pycache__/subtropical_high.cpython-312.pyc differ
++Binary files original/modules/detection/__pycache__/trough.cpython-312.pyc and project/modules/detection/__pycache__/trough.cpython-312.pyc differ
++diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/modules/detection/cold_vortex.py project/modules/detection/cold_vortex.py
++--- original/modules/detection/cold_vortex.py	2026-03-31 03:10:57.000000000 +0000
+++++ project/modules/detection/cold_vortex.py	2026-06-11 10:39:56.749616754 +0000
++@@ -1,7 +1,15 @@
++ """
++ 冷涡识别器
++ ==========
++-识别 500hPa 层次的冷涡（冷中心）。
+++识别 500hPa 层次的温度冷中心。
+++
+++命名说明:
+++    本识别器单独输出的是"温度冷中心"，并非严格意义的冷涡。
+++    真正的冷涡判定（GH 低压中心 + 冷中心配合，距离 ≤ 300km）在
+++    modules/tracking/cold_vortex_analysis.py 中完成。
+++    第一份识别报告中以"冷涡"标注的点实为冷中心，阅读时注意区分。
+++    另: required_vars 声明 GH+T 是为了保证配合判断所需数据齐全，
+++    本识别器 detect() 实际只使用 T。
++ 
++ 预报数据识别方式:
++     使用 metdig.cal.high_low_center() 对 T（温度场）识别冷暖中心，
++diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/modules/detection/trough.py project/modules/detection/trough.py
++--- original/modules/detection/trough.py	2026-04-09 03:01:03.000000000 +0000
+++++ project/modules/detection/trough.py	2026-06-11 10:39:56.748824508 +0000
++@@ -118,7 +118,8 @@
++             }]
++ 
++             logger.info(
++-                f"预报 {level}hPa: 识别到 {len(graphy)} 条高空槽"
+++                f"预报 {level}hPa: 识别到 "
+++                f"{len(graphy.get('features', {}))} 条高空槽"
++             )
++             return results
++ 
++Binary files original/modules/llm/__pycache__/__init__.cpython-312.pyc and project/modules/llm/__pycache__/__init__.cpython-312.pyc differ
++Binary files original/modules/llm/__pycache__/analyzer.cpython-312.pyc and project/modules/llm/__pycache__/analyzer.cpython-312.pyc differ
++Binary files original/modules/llm/__pycache__/data_serializer.cpython-312.pyc and project/modules/llm/__pycache__/data_serializer.cpython-312.pyc differ
++Binary files original/modules/llm/__pycache__/llm_client.cpython-312.pyc and project/modules/llm/__pycache__/llm_client.cpython-312.pyc differ
++Binary files original/modules/llm/__pycache__/location_service.cpython-312.pyc and project/modules/llm/__pycache__/location_service.cpython-312.pyc differ
++diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/modules/llm/llm_client.py project/modules/llm/llm_client.py
++--- original/modules/llm/llm_client.py	2026-04-27 15:04:54.000000000 +0000
+++++ project/modules/llm/llm_client.py	2026-06-11 10:39:31.121423296 +0000
++@@ -8,6 +8,25 @@
++ 
++ logger = logging.getLogger(__name__)
++ 
+++_client = None
+++
+++
+++def _get_client():
+++    """惰性创建并复用 OpenAI 客户端（带超时），避免每次调用重建连接"""
+++    global _client
+++    if _client is None:
+++        from openai import OpenAI
+++        from config.settings import (
+++            LLM_API_KEY, LLM_BASE_URL, LLM_TIMEOUT_SECONDS,
+++        )
+++        _client = OpenAI(
+++            api_key=LLM_API_KEY,
+++            base_url=LLM_BASE_URL,
+++            timeout=LLM_TIMEOUT_SECONDS,   # 防止网络问题卡死主流程
+++            max_retries=1,
+++        )
+++    return _client
+++
++ 
++ def call_llm(prompt: str, system_prompt: str = None) -> Optional[str]:
++     """
++@@ -30,12 +49,7 @@
++         return None
++ 
++     try:
++-        from openai import OpenAI
++-
++-        client = OpenAI(
++-            api_key=LLM_API_KEY,
++-            base_url=LLM_BASE_URL,
++-        )
+++        client = _get_client()
++ 
++         messages = []
++         if system_prompt:
++diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/modules/llm/location_service.py project/modules/llm/location_service.py
++--- original/modules/llm/location_service.py	2026-04-27 15:07:55.000000000 +0000
+++++ project/modules/llm/location_service.py	2026-06-11 10:39:31.122359576 +0000
++@@ -13,6 +13,10 @@
++ 
++ logger = logging.getLogger(__name__)
++ 
+++# 位置描述缓存: {(round(lon,1), round(lat,1)): 描述文本}
+++# 同一系统在分析和报告阶段会重复查询同一坐标，缓存避免重复调用 API
+++_location_cache = {}
+++
++ SYSTEM_PROMPT = """你是一个地理位置助手。用户给你中国范围内的经纬度坐标，你需要判断这些坐标位于哪个省份（或自治区），以及相对于该省份的大致方位（东部/南部/西部/北部/中部）。
++ 
++ 要求：
++@@ -44,6 +48,11 @@
++     center_lon = sum(c[0] for c in coords) / len(coords)
++     center_lat = sum(c[1] for c in coords) / len(coords)
++ 
+++    # 命中缓存直接返回
+++    cache_key = (round(center_lon, 1), round(center_lat, 1))
+++    if cache_key in _location_cache:
+++        return _location_cache[cache_key]
+++
++     # 构建 prompt
++     if len(coords) == 1:
++         prompt = f"{system_type}中心位于经度{center_lon:.1f}°E，纬度{center_lat:.1f}°N，请判断位于哪个省份的什么方位。"
++@@ -58,6 +67,8 @@
++     result = call_llm(prompt, SYSTEM_PROMPT)
++ 
++     if result:
+++        # 仅缓存成功结果；失败不缓存，避免一次网络抖动钉死整轮降级
+++        _location_cache[cache_key] = result
++         return result
++     else:
++         # 降级：返回坐标描述
++Binary files original/modules/report/__pycache__/__init__.cpython-312.pyc and project/modules/report/__pycache__/__init__.cpython-312.pyc differ
++Binary files original/modules/report/__pycache__/analysis_report.cpython-312.pyc and project/modules/report/__pycache__/analysis_report.cpython-312.pyc differ
++Binary files original/modules/report/__pycache__/word_generator.cpython-312.pyc and project/modules/report/__pycache__/word_generator.cpython-312.pyc differ
++diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/modules/report/word_generator.py project/modules/report/word_generator.py
++--- original/modules/report/word_generator.py	2026-03-30 12:25:23.000000000 +0000
+++++ project/modules/report/word_generator.py	2026-06-11 10:39:56.751080912 +0000
++@@ -50,7 +50,7 @@
++         os.makedirs(REPORT_DIR, exist_ok=True)
++ 
++     def generate(
++-        self, figure_paths: Dict[Tuple[str, str, int], Tuple[str, str]]
+++        self, figure_paths: Dict[Tuple[str, str, int], Tuple[str, str, str]]
++     ) -> str:
++         """
++         生成 Word 报告。
++@@ -58,7 +58,7 @@
++         Args:
++             figure_paths: 图片路径字典
++                 key:   (data_type, time_label, level)
++-                value: (field_fig_path, system_fig_path)
+++                value: (field_fig_path, system_fig_path, system_names)
++ 
++         Returns:
++             生成的 Word 文件路径
++Binary files original/modules/tracking/__pycache__/__init__.cpython-312.pyc and project/modules/tracking/__pycache__/__init__.cpython-312.pyc differ
++Binary files original/modules/tracking/__pycache__/base_tracker.cpython-312.pyc and project/modules/tracking/__pycache__/base_tracker.cpython-312.pyc differ
++Binary files original/modules/tracking/__pycache__/cold_vortex_analysis.cpython-312.pyc and project/modules/tracking/__pycache__/cold_vortex_analysis.cpython-312.pyc differ
++Binary files original/modules/tracking/__pycache__/match_strategy.cpython-312.pyc and project/modules/tracking/__pycache__/match_strategy.cpython-312.pyc differ
++Binary files original/modules/tracking/__pycache__/subtropical_high_analysis.cpython-312.pyc and project/modules/tracking/__pycache__/subtropical_high_analysis.cpython-312.pyc differ
++Binary files original/modules/tracking/__pycache__/tracker.cpython-312.pyc and project/modules/tracking/__pycache__/tracker.cpython-312.pyc differ
++Binary files original/modules/tracking/__pycache__/trough_analysis.cpython-312.pyc and project/modules/tracking/__pycache__/trough_analysis.cpython-312.pyc differ
++Binary files original/modules/tracking/__pycache__/trough_tracker.cpython-312.pyc and project/modules/tracking/__pycache__/trough_tracker.cpython-312.pyc differ
++Binary files original/modules/tracking/__pycache__/vortex_analysis.cpython-312.pyc and project/modules/tracking/__pycache__/vortex_analysis.cpython-312.pyc differ
++Binary files original/modules/tracking/__pycache__/vortex_tracker.cpython-312.pyc and project/modules/tracking/__pycache__/vortex_tracker.cpython-312.pyc differ
++diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/modules/tracking/cold_vortex_analysis.py project/modules/tracking/cold_vortex_analysis.py
++--- original/modules/tracking/cold_vortex_analysis.py	2026-04-28 06:52:27.000000000 +0000
+++++ project/modules/tracking/cold_vortex_analysis.py	2026-06-11 10:39:07.146924823 +0000
++@@ -497,14 +497,15 @@
++ def _match_obs_with_forecast(
++     obs_vortices: List[Dict], vortex_tracks: List[Dict]
++ ) -> Tuple[List, set]:
++-    """实况冷涡与预报冷涡轨迹匹配"""
++-    matched = []
++-    matched_ids = set()
++-
++-    for obs in obs_vortices:
++-        best_id = None
++-        best_dist = float("inf")
+++    """
+++    实况冷涡与预报冷涡轨迹匹配（全局一对一）。
++ 
+++    注意：冷涡轨迹首位置可能晚于 +000h（低压与冷中心后期才配合成功），
+++    属正常情况，此处不做 .000 检查。
+++    """
+++    # 1. 收集所有阈值内的 (距离, obs序号, vortex_id) 候选
+++    candidates = []
+++    for oi, obs in enumerate(obs_vortices):
++         for vt in vortex_tracks:
++             positions = vt.get("positions", [])
++             if not positions:
++@@ -513,13 +514,20 @@
++             dist = haversine_distance(
++                 obs["lon"], obs["lat"], first["lon"], first["lat"]
++             )
++-            if dist < best_dist:
++-                best_dist = dist
++-                best_id = vt["vortex_id"]
+++            if dist <= COLD_VORTEX_MATCH_DISTANCE:
+++                candidates.append((dist, oi, vt["vortex_id"]))
++ 
++-        if best_id is not None and best_dist <= COLD_VORTEX_MATCH_DISTANCE:
++-            matched.append((obs, best_id, best_dist))
++-            matched_ids.add(best_id)
+++    # 2. 按距离从近到远贪心一对一分配
+++    candidates.sort()
+++    matched = []
+++    matched_ids = set()
+++    used_obs = set()
+++    for dist, oi, vortex_id in candidates:
+++        if oi in used_obs or vortex_id in matched_ids:
+++            continue
+++        matched.append((obs_vortices[oi], vortex_id, dist))
+++        matched_ids.add(vortex_id)
+++        used_obs.add(oi)
++ 
++     return matched, matched_ids
++ 
++diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/modules/tracking/trough_analysis.py project/modules/tracking/trough_analysis.py
++--- original/modules/tracking/trough_analysis.py	2026-04-28 06:25:58.000000000 +0000
+++++ project/modules/tracking/trough_analysis.py	2026-06-11 10:39:07.145432076 +0000
++@@ -13,7 +13,7 @@
++ from modules.tracking.trough_tracker import TroughTracker
++ from utils.geo_utils import (
++     calculate_center, judge_trough_tilt, calculate_impact_time,
++-    get_direction_from_vector, get_opposite_direction,
+++    get_direction_from_vector, get_opposite_direction, haversine_distance,
++ )
++ from config.settings import TIANJIN_RANGE, TROUGH_MATCH_DISTANCE_THRESHOLD
++ 
++@@ -140,33 +140,48 @@
++ def _match_obs_with_forecast(
++     obs_troughs: List[Dict], tracker: TroughTracker
++ ) -> Tuple[List, set]:
++-    """实况槽线与预报追踪轨迹匹配"""
+++    """
+++    实况槽线与预报追踪轨迹匹配（球面距离 + 全局一对一）。
+++
+++    旧版逐条找最近会出现多条实况匹配同一轨迹（报告重复条目），
+++    且使用不带 cos(lat) 的平面近似（40°N 处东西向距离高估约 30%）。
+++    """
+++    # 预提取各轨迹首位置（正常应为 +000h 时次）
+++    track_firsts = []
+++    for track_id, troughs in tracker.tracks.items():
+++        if not troughs:
+++            continue
+++        first = troughs[0]
+++        if first.get("time_str") != ".000":
+++            logger.warning(
+++                f"槽线轨迹{track_id}首位置非+000h"
+++                f"({first.get('time_str')})，匹配距离可能偏移"
+++            )
+++        track_firsts.append((track_id, first))
+++
+++    # 1. 收集所有阈值内的 (距离, obs序号, track_id) 候选
+++    candidates = []
+++    for oi, obs_item in enumerate(obs_troughs):
+++        obs_center = calculate_center(obs_item["geometry"]["points"])
+++        for track_id, first in track_firsts:
+++            dist = haversine_distance(
+++                obs_center[0], obs_center[1],
+++                first["center_lon"], first["center_lat"],
+++            )
+++            if dist <= TROUGH_MATCH_DISTANCE_THRESHOLD:
+++                candidates.append((dist, oi, track_id))
+++
+++    # 2. 按距离从近到远贪心一对一分配
+++    candidates.sort()
++     matched_pairs = []
++     matched_track_ids = set()
++-
++-    for obs_item in obs_troughs:
++-        points = obs_item["geometry"]["points"]
++-        obs_center = calculate_center(points)
++-
++-        best_track_id = None
++-        best_distance = float("inf")
++-
++-        for track_id, troughs in tracker.tracks.items():
++-            if not troughs:
++-                continue
++-            first = troughs[0]
++-            dist = np.sqrt(
++-                (obs_center[0] - first["center_lon"]) ** 2
++-                + (obs_center[1] - first["center_lat"]) ** 2
++-            ) * 111
++-
++-            if dist < best_distance:
++-                best_distance = dist
++-                best_track_id = track_id
++-
++-        if best_track_id and best_distance <= TROUGH_MATCH_DISTANCE_THRESHOLD:
++-            matched_pairs.append((obs_item, best_track_id, best_distance))
++-            matched_track_ids.add(best_track_id)
+++    used_obs = set()
+++    for dist, oi, track_id in candidates:
+++        if oi in used_obs or track_id in matched_track_ids:
+++            continue
+++        matched_pairs.append((obs_troughs[oi], track_id, dist))
+++        matched_track_ids.add(track_id)
+++        used_obs.add(oi)
++ 
++     return matched_pairs, matched_track_ids
++ 
++diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/modules/tracking/trough_tracker.py project/modules/tracking/trough_tracker.py
++--- original/modules/tracking/trough_tracker.py	2026-04-09 02:51:51.000000000 +0000
+++++ project/modules/tracking/trough_tracker.py	2026-06-11 10:39:56.749795636 +0000
++@@ -53,6 +53,8 @@
++         feature = {
++             "center_lon": center.get("lon", 0),
++             "center_lat": center.get("lat", 0),
+++            # 注意: "lenght" 是 metdig 返回结果的原始字段名（上游拼写如此），
+++            # 切勿"修正"为 "length"，否则所有槽线长度都会变成 0
++             "length": axes.get("lenght", 0),
++             "strength": region.get("strength", 0),
++             "points": points,
++@@ -122,6 +124,8 @@
++         super().__init__()
++         self._prev_features: List[Dict] = []
++         self._prev_feature_to_track: Dict[int, int] = {}
+++        self._miss_count: int = 0
+++        self.MAX_MISS: int = 1   # 最多容忍连续 1 个空时次，超过才断开轨迹
++ 
++     def update(self, caldata, time_str: str, fcst_time=None):
++         """
++@@ -135,10 +139,15 @@
++         curr_features = extract_trough_features(caldata)
++ 
++         if not curr_features:
++-            self._prev_features = []
++-            self._prev_feature_to_track = {}
+++            # 单个时次缺测/无槽线不立即断轨，容忍 MAX_MISS 个空时次
+++            self._miss_count += 1
+++            if self._miss_count > self.MAX_MISS:
+++                self._prev_features = []
+++                self._prev_feature_to_track = {}
++             return
++ 
+++        self._miss_count = 0
+++
++         if not self._prev_features:
++             # 第一个时次，每条槽线新建轨迹
++             new_mapping = {}
++diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/modules/tracking/vortex_analysis.py project/modules/tracking/vortex_analysis.py
++--- original/modules/tracking/vortex_analysis.py	2026-04-28 06:35:53.000000000 +0000
+++++ project/modules/tracking/vortex_analysis.py	2026-06-11 10:39:07.146669488 +0000
++@@ -198,32 +198,43 @@
++ def _match_obs_with_forecast(
++     obs_vortices: List[Dict], tracker: VortexTracker
++ ) -> Tuple[List, set]:
++-    """实况低涡与预报追踪轨迹匹配"""
++-    matched_pairs = []
++-    matched_track_ids = set()
+++    """实况低涡与预报追踪轨迹匹配（全局一对一）"""
+++    # 预提取各轨迹首位置（正常应为 +000h 时次）
+++    track_firsts = []
+++    for track_id, vortices in tracker.tracks.items():
+++        if not vortices:
+++            continue
+++        first = vortices[0]
+++        if first.get("time_str") != ".000":
+++            logger.warning(
+++                f"低涡轨迹{track_id}首位置非+000h"
+++                f"({first.get('time_str')})，匹配距离可能偏移"
+++            )
+++        track_firsts.append((track_id, first))
++ 
++-    for obs_item in obs_vortices:
+++    # 1. 收集所有阈值内的 (距离, obs序号, track_id) 候选
+++    candidates = []
+++    for oi, obs_item in enumerate(obs_vortices):
++         geo = obs_item["geometry"]
++         obs_lon, obs_lat = geo["lon"], geo["lat"]
++-
++-        best_track_id = None
++-        best_distance = float("inf")
++-
++-        for track_id, vortices in tracker.tracks.items():
++-            if not vortices:
++-                continue
++-            first = vortices[0]
+++        for track_id, first in track_firsts:
++             dist = haversine_distance(
++                 obs_lon, obs_lat, first["lon"], first["lat"]
++             )
+++            if dist <= VORTEX_MATCH_DISTANCE_THRESHOLD:
+++                candidates.append((dist, oi, track_id))
++ 
++-            if dist < best_distance:
++-                best_distance = dist
++-                best_track_id = track_id
++-
++-        if best_track_id and best_distance <= VORTEX_MATCH_DISTANCE_THRESHOLD:
++-            matched_pairs.append((obs_item, best_track_id, best_distance))
++-            matched_track_ids.add(best_track_id)
+++    # 2. 按距离从近到远贪心一对一分配
+++    candidates.sort()
+++    matched_pairs = []
+++    matched_track_ids = set()
+++    used_obs = set()
+++    for dist, oi, track_id in candidates:
+++        if oi in used_obs or track_id in matched_track_ids:
+++            continue
+++        matched_pairs.append((obs_vortices[oi], track_id, dist))
+++        matched_track_ids.add(track_id)
+++        used_obs.add(oi)
++ 
++     return matched_pairs, matched_track_ids
++ 
++diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/modules/tracking/vortex_tracker.py project/modules/tracking/vortex_tracker.py
++--- original/modules/tracking/vortex_tracker.py	2026-04-23 01:40:16.000000000 +0000
+++++ project/modules/tracking/vortex_tracker.py	2026-06-11 10:38:33.451507573 +0000
++@@ -43,6 +43,9 @@
++         super().__init__()
++         self._prev_vortices: List[Dict] = []
++         self._prev_vortex_to_track: Dict[int, int] = {}
+++        self._prev_fcst_time = None   # 上一有效时次的预报时间
+++        self._miss_count: int = 0
+++        self.MAX_MISS: int = 1        # 最多容忍连续 1 个空时次
++ 
++     def update(self, detection_results: List[Dict], time_str: str, fcst_time=None):
++         """
++@@ -72,10 +75,16 @@
++             })
++ 
++         if not curr_vortices:
++-            self._prev_vortices = []
++-            self._prev_vortex_to_track = {}
+++            # 单个时次缺测不立即断轨，容忍 MAX_MISS 个空时次
+++            self._miss_count += 1
+++            if self._miss_count > self.MAX_MISS:
+++                self._prev_vortices = []
+++                self._prev_vortex_to_track = {}
+++                self._prev_fcst_time = None
++             return
++ 
+++        self._miss_count = 0
+++
++         if not self._prev_vortices:
++             # 第一个时次，每个低涡新建轨迹
++             new_mapping = {}
++@@ -86,11 +95,20 @@
++                 new_mapping[i] = track_id
++             self._prev_vortices = curr_vortices
++             self._prev_vortex_to_track = new_mapping
+++            self._prev_fcst_time = fcst_time
++             return
++ 
+++        # 计算与上一有效时次的实际时间间隔（小时）。
+++        # 跨过缺测时次时间隔自动变大，速度约束随之放宽，不再硬编码 3h
+++        time_hours = 3.0
+++        if fcst_time is not None and self._prev_fcst_time is not None:
+++            delta = (fcst_time - self._prev_fcst_time).total_seconds() / 3600.0
+++            if delta > 0:
+++                time_hours = delta
+++
++         # 匈牙利算法匹配
++         matches, new_indices, _ = self._hungarian_match(
++-            self._prev_vortices, curr_vortices
+++            self._prev_vortices, curr_vortices, time_hours=time_hours
++         )
++ 
++         new_mapping = {}
++@@ -111,6 +129,7 @@
++ 
++         self._prev_vortices = curr_vortices
++         self._prev_vortex_to_track = new_mapping
+++        self._prev_fcst_time = fcst_time
++ 
++     def get_tianjin_tracks(self, tianjin_range: dict) -> List[int]:
++         """
++Binary files original/modules/visualization/__pycache__/__init__.cpython-312.pyc and project/modules/visualization/__pycache__/__init__.cpython-312.pyc differ
++Binary files original/modules/visualization/__pycache__/analysis_plotter.cpython-312.pyc and project/modules/visualization/__pycache__/analysis_plotter.cpython-312.pyc differ
++Binary files original/modules/visualization/__pycache__/field_plotter.cpython-312.pyc and project/modules/visualization/__pycache__/field_plotter.cpython-312.pyc differ
++Binary files original/modules/visualization/__pycache__/system_plotter.cpython-312.pyc and project/modules/visualization/__pycache__/system_plotter.cpython-312.pyc differ
++diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/modules/visualization/system_plotter.py project/modules/visualization/system_plotter.py
++--- original/modules/visualization/system_plotter.py	2026-05-29 07:46:07.000000000 +0000
+++++ project/modules/visualization/system_plotter.py	2026-06-11 10:39:31.122850548 +0000
++@@ -177,24 +177,41 @@
++ )
++ 
++ 
+++_land_polygons_cache = None
+++
+++
+++def _load_land_polygons():
+++    """读取陆地 shapefile（含全部 parts），模块级缓存，磁盘只读一次"""
+++    global _land_polygons_cache
+++    if _land_polygons_cache is None:
+++        sf = shp.Reader(_land_shp)
+++        polys = []
+++        for shape in sf.shapes():
+++            parts = list(shape.parts) + [len(shape.points)]
+++            # 遍历该 shape 的所有 part（多部分多边形：大陆 + 岛屿）。
+++            # 旧版只取 parts[0]:parts[1]，岛屿环全部丢失
+++            for k in range(len(parts) - 1):
+++                pts = shape.points[parts[k]:parts[k + 1]]
+++                if len(pts) >= 3:
+++                    polys.append(pts)
+++        _land_polygons_cache = polys
+++    return _land_polygons_cache
+++
+++
++ def draw_ocean_land(ax, map_config=None):
++     """
++     绘制海洋蓝色背景和陆地填充，区分海陆边界。
++ 
+++    陆地多边形坐标首次调用时读取并缓存；PatchCollection 不能跨
+++    figure 复用，因此每次重建 Polygon 对象（很廉价），磁盘只读一次。
+++
++     Args:
++         ax:         matplotlib axes
++         map_config: MapConfig（可选，未使用）
++     """
++     ax.set_facecolor('#A8D4F0')
++ 
++-    sf = shp.Reader(_land_shp)
++-    patches = []
++-    for shape in sf.shapes():
++-        parts = list(shape.parts) + [len(shape.points)]
++-        points = shape.points[parts[0]:parts[1]]
++-        if len(points) >= 3:
++-            patches.append(Polygon(points, closed=True))
++-
+++    patches = [Polygon(p, closed=True) for p in _load_land_polygons()]
++     if patches:
++         pc = PatchCollection(
++             patches, facecolor='white', edgecolor='none', zorder=1
++Binary files original/utils/__pycache__/__init__.cpython-312.pyc and project/utils/__pycache__/__init__.cpython-312.pyc differ
++Binary files original/utils/__pycache__/geo_utils.cpython-312.pyc and project/utils/__pycache__/geo_utils.cpython-312.pyc differ
++Binary files original/utils/__pycache__/path_builder.cpython-312.pyc and project/utils/__pycache__/path_builder.cpython-312.pyc differ
++diff -ruN '--exclude=ne_110m_land' '--exclude=tests' '--exclude=.gitignore' '--exclude=修改说明.md' '--exclude=.pytest_cache' original/utils/path_builder.py project/utils/path_builder.py
++--- original/utils/path_builder.py	2026-05-29 01:38:32.000000000 +0000
+++++ project/utils/path_builder.py	2026-06-11 10:39:56.750543292 +0000
++@@ -5,7 +5,7 @@
++ 
++ 路径规则:
++     MICAPS4:  {root}/{YYYYMMDD}/{model}/{variable}/{level}/{YYMMDDhh}.{FFF}
++-    MICAPS14: {root}/{YYYYMMDD}/UPPER_AIR/MANUAL_ANALYSIS/{variable}/{level}/{YYYYMMDDHHmmss}.000
+++    MICAPS14: {root}/{YYYY}/{YYYYMMDD}/UPPER_AIR/MANUAL_ANALYSIS/{variable}/{level}/{YYYYMMDDHHmmss}.000
++ """
++ import os
++ from datetime import datetime, timedelta
++@@ -65,7 +65,7 @@
++     示例:
++         >>> build_micaps14_path("/data/UPPER_AIR", "HGT", 500,
++         ...                     datetime(2025,6,1,8))
++-        "/data/UPPER_AIR/20250601/UPPER_AIR/MANUAL_ANALYSIS/HGT/500/20250601080000.000"
+++        "/data/UPPER_AIR/2025/20250601/UPPER_AIR/MANUAL_ANALYSIS/HGT/500/20250601080000.000"
++     """
++     year_dir = obs_time.strftime("%Y")
++     date_dir = obs_time.strftime("%Y%m%d")
