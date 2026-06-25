@@ -9,7 +9,7 @@
     输出: 槽线坐标列表
 
 实况数据识别方式:
-    MICAPS14 手工分析数据中已包含人工标注的槽线（lines_symbol, code=0）。
+    MICAPS14 手工分析数据中已包含人工标注的槽线（lines_symbol, code=0、1 为槽线）。
     直接从数据字典中提取。
 
 依赖:
@@ -134,7 +134,7 @@ class TroughDetector(BaseDetector):
         从 MICAPS14 实况数据中提取人工标注的槽线。
 
         MICAPS14 数据结构:
-            data_dict["HGT"]["lines_symbol"]["linesym_code"]  → 代码列表（0=槽线）
+            data_dict["HGT"]["lines_symbol"]["linesym_code"]  → 代码列表（0、1 为槽线）
             data_dict["HGT"]["lines_symbol"]["linesym_xyz"]   → 坐标列表
         """
         hgt_data = data_dict.get("HGT")
@@ -151,7 +151,7 @@ class TroughDetector(BaseDetector):
             results = []
             for i in range(len(lines_symbol["linesym_code"])):
                 code = lines_symbol["linesym_code"][i]
-                if code == 0:  # 0 = 槽线
+                if code in (0, 1):  # 0、1 均为槽线
                     line_xyz = lines_symbol["linesym_xyz"][i]
                     points = line_xyz[:, 0:2]  # 取 lon, lat
                     center_lon = float(np.mean(points[:, 0]))

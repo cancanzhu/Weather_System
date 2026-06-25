@@ -154,6 +154,27 @@ def _plot_low_level_jet(ax, results: List[Dict[str, Any]]):
             if jet_lines:
                 meb.add_curved_arrows(ax, jet_lines, color="brown", linewidth=1.5,
                                       head_width=1, head_length=1)
+                
+def _plot_shear_line(ax, results):
+    """
+    绘制切变线。
+        graphy_raw: 预报，meb.add_solid_lines 直接绘制
+        line:       实况，ax.plot 逐条绘制
+    """
+    for item in results:
+        geometry = item.get("geometry", {})
+        geo_type = geometry.get("type", "")
+
+        if geo_type == "graphy_raw":
+            graphy = geometry.get("graphy", None)
+            if graphy:
+                meb.add_solid_lines(ax, graphy, color="purple", linewidth=2.0)
+
+        elif geo_type == "line":
+            points = np.array(geometry.get("points", []))
+            if len(points) >= 2:
+                ax.plot(points[:, 0], points[:, 1], color="purple",
+                        linewidth=2.0, zorder=50)
 
 
 # ============================================================
@@ -169,6 +190,7 @@ PLOT_HANDLERS: Dict[str, Callable] = {
     "冷涡":       _plot_cold_vortex,
     "低空低涡":   _plot_low_level_vortex,
     "低空急流":   _plot_low_level_jet,
+    "切变线": _plot_shear_line,
 }
 
 _land_shp = os.path.join(

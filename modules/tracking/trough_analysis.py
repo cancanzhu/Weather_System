@@ -202,7 +202,7 @@ def _analyze_single_trough(
     location = get_line_location(obs_item["geometry"]["points"], "高空槽")
 
     # 前倾/后倾
-    tilt_type = _judge_tilt(obs_center, obs_detection_results)
+    tilt_type = _judge_tilt(obs_item["geometry"]["points"], obs_detection_results)
 
     # 移动方向
     from_dir, to_dir = _analyze_movement(tracker, track_id)
@@ -246,23 +246,41 @@ def _analyze_new_trough(
     }
 
 
-def _judge_tilt(obs_center: tuple, obs_detection_results: Dict) -> str:
-    """从 700/850hPa 实况找最近的槽线判断前倾/后倾"""
+def _judge_tilt(obs_points: list, obs_detection_results: Dict) -> str:
+    """
+    从 700/850hPa 实况槽线中选重心距离最近的一条，
+    与 500hPa 槽线（obs_points）逐纬度比较判断前倾/后倾。
+
+    （修复：旧版只比重心经度且碰到第一条就用；现取真正最近的
+    低层槽，并把两条槽的完整坐标传给 judge_trough_tilt 做纬度对齐比较。）
+    """
+    obs_center = calculate_center(obs_points)
+
+    best_points = None
+    best_dist = float("inf")
     for (tl, lv), det in obs_detection_results.items():
         if lv not in [700, 850]:
             continue
-        if "高空槽" in det:
-            for item in det["高空槽"]:
-                geo = item.get("geometry", {})
-                if geo.get("type") == "line":
-                    other_center = calculate_center(geo["points"])
-                    dist = np.sqrt(
-                        (obs_center[0] - other_center[0]) ** 2
-                        + (obs_center[1] - other_center[1]) ** 2
-                    )
-                    if dist < 5.0:
-                        return judge_trough_tilt(obs_center, other_center)
-    return "未知"
+        if "高空槽" not in det:
+            continue
+        for item in det["高空槽"]:
+            geo = item.get("geometry", {})
+            if geo.get("type") != "line":
+                continue
+            other_center = calculate_center(geo["points"])
+            dist = np.sqrt(
+                (obs_center[0] - other_center[0]) ** 2
+                + (obs_center[1] - other_center[1]) ** 2
+            )
+            if dist < best_dist:
+                best_dist = dist
+                best_points = geo["points"]
+
+    # 距离上限沿用原 5.0（经纬度平面近似）；超出则认为无对应低层槽
+    if best_points is None or best_dist >= 5.0:
+        return "未知"
+
+    return judge_trough_tilt(obs_points, best_points)
 
 
 def _analyze_movement(tracker: TroughTracker, track_id: int) -> Tuple[str, str]:

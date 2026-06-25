@@ -16,7 +16,11 @@ import logging
 import numpy as np
 from typing import Dict, List, Tuple, Any
 
-from config.settings import SUBTROPICAL_HIGH_LAT_THRESHOLD
+from config.settings import (
+    SUBTROPICAL_HIGH_LAT_THRESHOLD,
+    SUBTROPICAL_HIGH_LON_MIN,
+    SUBTROPICAL_HIGH_LON_MAX,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +102,28 @@ def run(
     return analyses
 
 
+def _max_lat_in_lon_window(points: np.ndarray) -> float:
+    """
+    返回 588 线落在天津经度窗口内那些点的最北纬度。
+
+    只统计 SUBTROPICAL_HIGH_LON_MIN ~ MAX 之间的点，避免远离天津
+    的副高西段北抬被误判。窗口内无点时返回 nan。
+
+    Args:
+        points: 588 线坐标 [[lon, lat], ...]
+
+    Returns:
+        窗口内最北纬度，无有效点时 nan
+    """
+    if points is None or len(points) == 0:
+        return float("nan")
+    lon = points[:, 0]
+    lat = points[:, 1]
+    mask = (lon >= SUBTROPICAL_HIGH_LON_MIN) & (lon <= SUBTROPICAL_HIGH_LON_MAX)
+    if not np.any(mask):
+        return float("nan")
+    return float(np.max(lat[mask]))
+
 def _analyze_obs(obs_detection_results: Dict) -> Dict:
     """分析实况 500hPa 588线"""
     max_lat = float("nan")
@@ -111,9 +137,10 @@ def _analyze_obs(obs_detection_results: Dict) -> Dict:
                 continue
             points = np.array(geo.get("points", []))
             if len(points) > 0:
-                line_max_lat = np.max(points[:, 1])
-                if np.isnan(max_lat) or line_max_lat > max_lat:
-                    max_lat = line_max_lat
+                line_max_lat = _max_lat_in_lon_window(points)
+                if not np.isnan(line_max_lat):
+                    if np.isnan(max_lat) or line_max_lat > max_lat:
+                        max_lat = line_max_lat
 
     is_affecting = (not np.isnan(max_lat)) and (max_lat >= SUBTROPICAL_HIGH_LAT_THRESHOLD)
 
@@ -155,9 +182,10 @@ def _analyze_forecast(
                 continue
             points = np.array(geo.get("points", []))
             if len(points) > 0:
-                line_max_lat = np.max(points[:, 1])
-                if np.isnan(max_lat) or line_max_lat > max_lat:
-                    max_lat = line_max_lat
+                line_max_lat = _max_lat_in_lon_window(points)
+                if not np.isnan(line_max_lat):
+                    if np.isnan(max_lat) or line_max_lat > max_lat:
+                        max_lat = line_max_lat
 
         all_results[fh] = max_lat
 

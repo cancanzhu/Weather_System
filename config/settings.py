@@ -170,6 +170,23 @@ COLD_VORTEX_MATCH_DISTANCE = 200         # 实况-预报匹配距离(km)
 
 # 副热带高压分析配置
 SUBTROPICAL_HIGH_LAT_THRESHOLD = 36.0    # 影响天津的纬度阈值（°N）
+SUBTROPICAL_HIGH_LAT_THRESHOLD = 36.0    # 影响天津的纬度阈值（°N）
+# 副高影响天津的经度窗口：只统计该经度范围内的 588 线最北纬度，
+# 避免远离天津的副高西段（如 105°E 一带）北抬被误判为影响天津。
+# 天津约 117.2°E，窗口取其两侧若干度。
+SUBTROPICAL_HIGH_LON_MIN = 110.0
+SUBTROPICAL_HIGH_LON_MAX = 122.0
+
+# 切变线识别参数
+SHEAR_RESOLUTION = "low"
+SHEAR_SMOOTH_TIMES = 0       # shear 默认 0，先按默认
+SHEAR_MIN_SIZE = 200         # 文档示例用 200，识别太多/太碎就调大
+
+# 切变线追踪配置（阶段二用，先一起放进来）
+SHEAR_TRACK_DISTANCE_MAX = 250
+SHEAR_TRACK_SIMILARITY_THRESHOLD = 0.4
+SHEAR_MATCH_DISTANCE_THRESHOLD = 200
+
 
 # 冷涡分类区域
 COLD_VORTEX_TYPES = {
@@ -231,6 +248,15 @@ WEATHER_SYSTEM_REGISTRY: Dict[str, dict] = {
         "fcst_vars": ["U", "V"],
         "obs_vars": ["HGT"],
     },
+    "切变线": {
+    "levels": [700, 850],
+    "required_vars": ["U", "V"],
+    "detector_class": "ShearLineDetector",
+    "module": "shear_line",
+    "description": "700/850hPa切变线识别",
+    "fcst_vars": ["U", "V"],
+    "obs_vars": ["HGT"],
+},
 }
 
 # ============================================================

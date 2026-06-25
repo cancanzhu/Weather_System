@@ -17,7 +17,7 @@ MICAPS14 数据读取器
             "symbol_xyz":  [ndarray, ...],       # 符号位置 [lon, lat]
         },
         "lines_symbol": {                       # 特殊线符号（槽线等）
-            "linesym_code": [int, ...],          # 线符号代码: 0=槽线
+            "linesym_code": [int, ...],          # 线符号代码: 0,1=槽线
             "linesym_xyz":  [ndarray, ...],      # 线坐标, shape=(n,3), 取 [:, 0:2] 得 lon/lat
         },
     }

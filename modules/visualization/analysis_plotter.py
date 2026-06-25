@@ -115,20 +115,27 @@ class AnalysisPlotter:
                             color="brown", linewidth=2.0, zorder=50,
                         )
 
-            # 副热带高压 588线（仅在影响天津时绘制）
+            # 副热带高压 588线：影响天津才标红，否则画深蓝
             from config.settings import SUBTROPICAL_HIGH_LAT_THRESHOLD
+            from modules.tracking.subtropical_high_analysis import (
+                _max_lat_in_lon_window,
+            )
             sub_highs = detection.get("副热带高压", [])
             for item in sub_highs:
                 geo = item.get("geometry", {})
                 if geo.get("type") == "line":
                     points = np.array(geo["points"])
                     if len(points) >= 2:
-                        max_lat = np.max(points[:, 1])
-                        if max_lat >= SUBTROPICAL_HIGH_LAT_THRESHOLD:
-                            ax.plot(
-                                points[:, 0], points[:, 1],
-                                color="red", linewidth=2.0, zorder=50,
-                            )
+                        win_max_lat = _max_lat_in_lon_window(points)
+                        affecting = (
+                            not np.isnan(win_max_lat)
+                            and win_max_lat >= SUBTROPICAL_HIGH_LAT_THRESHOLD
+                        )
+                        line_color = "red" if affecting else "darkblue"
+                        ax.plot(
+                            points[:, 0], points[:, 1],
+                            color=line_color, linewidth=2.0, zorder=50,
+                        )
 
             # 冷涡
             cold_vortex = detection.get("冷涡", [])
@@ -433,6 +440,9 @@ class AnalysisPlotter:
             return
 
         from config.settings import SUBTROPICAL_HIGH_LAT_THRESHOLD
+        from modules.tracking.subtropical_high_analysis import (
+            _max_lat_in_lon_window,
+        )
 
         normal_lines = []
         line_588 = []
@@ -441,9 +451,9 @@ class AnalysisPlotter:
             line_points = line_xyz[:, 0:2].tolist()
             label = str(lines["line_label"][i]).strip()
             if label == "588":
-                # 检查最北纬度是否影响天津
-                max_lat = max(p[1] for p in line_points)
-                if max_lat >= SUBTROPICAL_HIGH_LAT_THRESHOLD:
+                win_max_lat = _max_lat_in_lon_window(np.array(line_points))
+                if (not np.isnan(win_max_lat)
+                        and win_max_lat >= SUBTROPICAL_HIGH_LAT_THRESHOLD):
                     line_588.append(line_points)
                 else:
                     normal_lines.append(line_points)

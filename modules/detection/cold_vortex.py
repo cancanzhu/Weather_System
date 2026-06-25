@@ -16,7 +16,7 @@
     筛选 feature_id < 0 的冷中心。
 
 实况数据识别方式:
-    从 MICAPS14 HGT 数据的符号标注中提取 symbol_code == 63（冷中心）。
+    从 MICAPS14 TMP 数据的符号标注中提取 symbol_code == 63（冷中心）。  
 """
 import logging
 import meteva.base as meb
@@ -103,14 +103,15 @@ class ColdVortexDetector(BaseDetector):
 
     def _detect_from_observation(self, data_dict: dict, level: int) -> List[Dict[str, Any]]:
         """
-        从 MICAPS14 实况数据中提取冷中心（symbol_code == 63）。
+        从 MICAPS14 实况温度场(TMP)的符号标注中提取冷中心（symbol_code == 63）。
+        冷/暖中心标注在温度场分析图上（62=暖中心, 63=冷中心），故读 TMP 而非 HGT。
         """
-        hgt_data = data_dict.get("HGT")
-        if hgt_data is None:
+        tmp_data = data_dict.get("TMP")
+        if tmp_data is None:
             return []
 
         try:
-            symbols = hgt_data.get("symbols")
+            symbols = tmp_data.get("symbols")
             if symbols is None:
                 return []
 
@@ -136,7 +137,7 @@ class ColdVortexDetector(BaseDetector):
                         },
                     })
 
-            logger.info(f"实况 {level}hPa: 提取到 {len(results)} 个冷涡")
+            logger.info(f"实况 {level}hPa: 提取到 {len(results)} 个冷中心")
             return results
 
         except Exception as e:
