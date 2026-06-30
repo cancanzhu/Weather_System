@@ -139,17 +139,17 @@ def judge_trough_tilt(points_500, points_lower) -> str:
 
     # 在重叠带内取若干代表纬度，分别插值出两层槽的经度并比较
     sample_lats = np.linspace(lat_lo, lat_hi, 5)
-    front = 0  # 前倾票（低层在 500 东侧）
-    back = 0   # 后倾票（低层在 500 西侧）
+    front = 0  # 前倾票（低层在 500 西侧）
+    back = 0   # 后倾票（低层在 500 东侧）
     for lat in sample_lats:
         lon5 = _interp_lon_at_lat(p5, lat)
         lonl = _interp_lon_at_lat(pl, lat)
         if lon5 is None or lonl is None:
             continue
         if lonl < lon5:        # 低层在 500 西侧 → 后倾
-            back += 1
-        elif lonl > lon5:      # 低层在 500 东侧 → 前倾
             front += 1
+        elif lonl > lon5:      # 低层在 500 东侧 → 前倾
+            back += 1
 
     if front == 0 and back == 0:
         return "未知"

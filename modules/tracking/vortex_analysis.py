@@ -118,8 +118,10 @@ def run(
             geo = obs_item.get("geometry", {})
             location = get_point_location(geo["lon"], geo["lat"], "低涡")
 
-            # 中心强度
-            strength = obs_item.get("properties", {}).get("value", "未知")
+            # 中心强度：实况低压符号(MICAPS14 code 61)不带数值，
+            # 改用匹配到的预报轨迹首位置(≈+000h)的低压中心值
+            first_v = tracker.tracks[track_id][0]
+            strength = first_v.get("value", "未知")
 
             # 象限
             from utils.geo_utils import calculate_quadrant

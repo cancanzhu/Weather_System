@@ -15,7 +15,10 @@ from utils.geo_utils import (
     calculate_center, judge_trough_tilt, calculate_impact_time,
     get_direction_from_vector, get_opposite_direction, haversine_distance,
 )
-from config.settings import TIANJIN_RANGE, TROUGH_MATCH_DISTANCE_THRESHOLD
+from config.settings import (
+    TIANJIN_RANGE, TROUGH_MATCH_DISTANCE_THRESHOLD,
+    TILT_MATCH_WEIGHTS, TILT_MATCH_DIST_SCALE, TILT_MATCH_SCORE_MIN,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -247,40 +250,87 @@ def _analyze_new_trough(
 
 
 def _judge_tilt(obs_points: list, obs_detection_results: Dict) -> str:
-    """
-    从 700/850hPa 实况槽线中选重心距离最近的一条，
-    与 500hPa 槽线（obs_points）逐纬度比较判断前倾/后倾。
-
-    （修复：旧版只比重心经度且碰到第一条就用；现取真正最近的
-    低层槽，并把两条槽的完整坐标传给 judge_trough_tilt 做纬度对齐比较。）
-    """
-    obs_center = calculate_center(obs_points)
-
     best_points = None
-    best_dist = float("inf")
+    best_score = -float("inf")
+    cand_count = 0
+
     for (tl, lv), det in obs_detection_results.items():
         if lv not in [700, 850]:
             continue
-        if "高空槽" not in det:
+        if "切变线" not in det:
             continue
-        for item in det["高空槽"]:
+        for item in det["切变线"]:
             geo = item.get("geometry", {})
             if geo.get("type") != "line":
                 continue
-            other_center = calculate_center(geo["points"])
-            dist = np.sqrt(
-                (obs_center[0] - other_center[0]) ** 2
-                + (obs_center[1] - other_center[1]) ** 2
-            )
-            if dist < best_dist:
-                best_dist = dist
-                best_points = geo["points"]
+            cand = geo["points"]
+            cand_count += 1
+            score = _trough_match_score(obs_points, cand)
+            logger.info(f"[倾向候选] lv={lv} score={score} "
+                        f"首尾=({cand[0]},{cand[-1]}) 点数={len(cand)}")
+            if score is None:
+                continue
+            if score > best_score:
+                best_score = score
+                best_points = cand
 
-    # 距离上限沿用原 5.0（经纬度平面近似）；超出则认为无对应低层槽
-    if best_points is None or best_dist >= 5.0:
+    logger.info(f"[倾向] 候选总数={cand_count} best_score={best_score} "
+                f"best_points={'有' if best_points else '无'}")
+
+    if best_points is None:
+        logger.info("[倾向] → 未知（没有可用候选低层槽）")
         return "未知"
 
-    return judge_trough_tilt(obs_points, best_points)
+    result = judge_trough_tilt(obs_points, best_points)
+    logger.info(f"[倾向] 500槽首尾=({obs_points[0]},{obs_points[-1]}) "
+                f"选中低层槽首尾=({best_points[0]},{best_points[-1]}) → {result}")
+    return result
+
+
+def _trough_match_score(p500: list, plow: list):
+    """
+    两条槽线的匹配度评分（0~1，越大越匹配）。综合三项：
+      1) 重心距离接近度：重心越近分越高（TILT_MATCH_DIST_SCALE 度内线性衰减）
+      2) 纬度重叠比例：两条槽共同覆盖的纬度带占比越大越匹配
+      3) 走向一致度：两条槽首尾方向向量的余弦相似度
+
+    纬度无重叠 → 返回 None（无法做纬度对齐比较，直接排除）。
+    """
+    a = np.asarray(p500, dtype=float)
+    b = np.asarray(plow, dtype=float)
+    if len(a) < 2 or len(b) < 2:
+        return None
+
+    # 1) 重心距离接近度
+    ca = a.mean(axis=0)
+    cb = b.mean(axis=0)
+    dist = float(np.hypot(ca[0] - cb[0], ca[1] - cb[1]))
+    dist_score = max(0.0, 1.0 - dist / TILT_MATCH_DIST_SCALE)
+
+    # 2) 纬度重叠比例
+    lat_lo = max(a[:, 1].min(), b[:, 1].min())
+    lat_hi = min(a[:, 1].max(), b[:, 1].max())
+    if lat_hi <= lat_lo:
+        return None                              # 纬度不重叠 → 排除
+    span = max(a[:, 1].max() - a[:, 1].min(),
+               b[:, 1].max() - b[:, 1].min(), 1e-6)
+    overlap_score = (lat_hi - lat_lo) / span     # 0~1
+
+    # 3) 走向一致度（首尾连线方向的余弦相似度，映射到 0~1）
+    va = a[-1] - a[0]
+    vb = b[-1] - b[0]
+    na = np.linalg.norm(va)
+    nb = np.linalg.norm(vb)
+    if na < 1e-6 or nb < 1e-6:
+        dir_score = 0.0
+    else:
+        cos = float(np.dot(va, vb) / (na * nb))
+        dir_score = (cos + 1.0) / 2.0            # -1~1 → 0~1
+
+    w = TILT_MATCH_WEIGHTS
+    return (w["dist"] * dist_score
+            + w["overlap"] * overlap_score
+            + w["direction"] * dir_score)
 
 
 def _analyze_movement(tracker: TroughTracker, track_id: int) -> Tuple[str, str]:

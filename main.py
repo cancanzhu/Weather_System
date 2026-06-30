@@ -182,8 +182,8 @@ def main():
 
     # 冷涡追踪
     from modules.tracking import cold_vortex_analysis
-    cold_vortex_analyses, cold_vortex_tracks, cold_vortex_impact_ids = \
-        cold_vortex_analysis.run(
+    cold_vortex_analyses, cold_vortex_tracks, cold_vortex_impact_ids, \
+        cold_lp_tracks, cold_cc_tracks = cold_vortex_analysis.run(
             forecast_data, fcst_detection_results, obs_detection_results, obs_data,
         )
     
@@ -229,12 +229,12 @@ def main():
             level_figs["obs"] = obs_fig
 
         # 预报追踪图
-        if level == 500 and (trough_tracker.tracks or cold_vortex_tracks):
+        if level == 500 and (trough_tracker.tracks or cold_lp_tracks or cold_cc_tracks):
             fcst_fig = analysis_plotter.plot_fcst_tracking(
                 trough_tracker, trough_tianjin_ids, level,
                 time_label=obs_time_label or "预报",
-                cold_vortex_tracks=cold_vortex_tracks,
-                cold_vortex_impact_ids=cold_vortex_impact_ids,
+                cold_low_tracks=cold_lp_tracks,
+                cold_center_tracks=cold_cc_tracks,
             )
         elif level in vortex_trackers and vortex_trackers[level].tracks:
             fcst_fig = analysis_plotter.plot_fcst_tracking(

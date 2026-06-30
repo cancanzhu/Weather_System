@@ -101,10 +101,10 @@ MAP_CONFIG = MapConfig()
 
 # 天津影响判断区域（用于追踪模块判断槽线是否影响天津）
 TIANJIN_RANGE = {
-    "lon_min": 116,
-    "lon_max": 118,
+    "lon_min": 105,
+    "lon_max": 120,
     "lat_min": 38,
-    "lat_max": 40,
+    "lat_max": 45,
 }
 
 # 风场绘图参数
@@ -153,9 +153,9 @@ JET_MIN_SPEED = 12
 JET_ONLY_SOUTH = False
 
 # 槽线追踪配置
-TROUGH_TRACK_DISTANCE_MAX = 250          # 追踪匹配最大距离(km)，超过视为不同槽线
-TROUGH_TRACK_SIMILARITY_THRESHOLD = 0.4  # 追踪相似度阈值
-TROUGH_MATCH_DISTANCE_THRESHOLD = 200    # 实况-预报匹配距离阈值(km)
+TROUGH_TRACK_DISTANCE_MAX = 350          # 追踪匹配最大距离(km)，超过视为不同槽线
+TROUGH_TRACK_SIMILARITY_THRESHOLD = 0.3  # 追踪相似度阈值
+TROUGH_MATCH_DISTANCE_THRESHOLD = 400    # 实况-预报匹配距离阈值(km)
 
 # 低涡追踪配置
 VORTEX_TRACK_DISTANCE_MAX = 300          # 追踪匹配最大距离(km)
@@ -164,9 +164,9 @@ VORTEX_MATCH_DISTANCE_THRESHOLD = 300    # 实况-预报匹配距离阈值(km)
 VORTEX_TIANJIN_IMPACT_DISTANCE = 150     # 天津影响缓冲区距离(km)
 
 # 冷涡追踪配置
-COLD_VORTEX_COUPLING_DISTANCE = 300      # 低压-冷中心配合距离(km)
+COLD_VORTEX_COUPLING_DISTANCE = 900      # 低压-冷中心配合距离(km)
 COLD_VORTEX_TRACK_DISTANCE_MAX = 300     # 追踪最大距离(km)
-COLD_VORTEX_MATCH_DISTANCE = 200         # 实况-预报匹配距离(km)
+COLD_VORTEX_MATCH_DISTANCE = 300         # 实况-预报匹配距离(km)
 
 # 副热带高压分析配置
 SUBTROPICAL_HIGH_LAT_THRESHOLD = 36.0    # 影响天津的纬度阈值（°N）
@@ -181,6 +181,15 @@ SUBTROPICAL_HIGH_LON_MAX = 122.0
 SHEAR_RESOLUTION = "low"
 SHEAR_SMOOTH_TIMES = 0       # shear 默认 0，先按默认
 SHEAR_MIN_SIZE = 200         # 文档示例用 200，识别太多/太碎就调大
+
+# ── 前倾/后倾：低层槽匹配评分权重与阈值 ──
+TILT_MATCH_WEIGHTS = {
+    "dist": 0.4,      # 重心距离接近度权重
+    "overlap": 0.6,   # 纬度重叠比例权重
+    "direction": 0, # 走向(首尾方向)一致度权重
+}
+TILT_MATCH_DIST_SCALE = 5.0   # 重心距离衰减尺度(度)；超过此值距离得分归0
+TILT_MATCH_SCORE_MIN = 0.3    # 综合得分低于此 → 判"未知"(匹配不上)
 
 # 切变线追踪配置（阶段二用，先一起放进来）
 SHEAR_TRACK_DISTANCE_MAX = 250
@@ -228,7 +237,7 @@ WEATHER_SYSTEM_REGISTRY: Dict[str, dict] = {
         "module": "cold_vortex",
         "description": "500hPa冷涡识别",
         "fcst_vars": ["GH", "T"],
-        "obs_vars": ["HGT", "TMP"],
+        "obs_vars": ["TMP"],
     },
     "低空低涡": {
         "levels": [700, 850],
@@ -236,6 +245,15 @@ WEATHER_SYSTEM_REGISTRY: Dict[str, dict] = {
         "detector_class": "LowLevelVortexDetector",
         "module": "low_level_vortex",
         "description": "700hPa/850hPa低空低涡识别",
+        "fcst_vars": ["GH"],
+        "obs_vars": ["HGT"],
+    },
+        "低压中心": {
+        "levels": [500],
+        "required_vars": ["GH"],
+        "detector_class": "LowLevelVortexDetector",
+        "module": "low_level_vortex",
+        "description": "500hPa低压中心识别",
         "fcst_vars": ["GH"],
         "obs_vars": ["HGT"],
     },
@@ -280,11 +298,18 @@ REPORT_CONFIG = ReportConfig()
 #   Linux/macOS:           export DASHSCOPE_API_KEY="sk-xxx"
 # 注意: 旧版本曾将真实 Key 写死在此文件并随工程分发，该 Key 视为已泄露，
 #       必须在 DashScope 控制台吊销后更换新 Key。
-LLM_API_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
+
+# LLM_API_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
+try:
+    from config.secrets import DASHSCOPE_API_KEY as _KEY_FROM_FILE
+except ImportError:
+    _KEY_FROM_FILE = ""
+LLM_API_KEY = os.environ.get("DASHSCOPE_API_KEY", "") or _KEY_FROM_FILE
+
 LLM_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 LLM_MODEL = "qwen3.6-plus"
 LLM_ENABLED = True    # 设为 False 可关闭大模型，使用坐标代替省份
-LLM_TIMEOUT_SECONDS = 10   # 单次 API 调用超时（秒），防止网络问题卡死主流程
+LLM_TIMEOUT_SECONDS = 60   # 单次 API 调用超时（秒），防止网络问题卡死主流程
 
 # ============================================================
 # 后续扩展配置（预留）

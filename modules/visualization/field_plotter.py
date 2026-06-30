@@ -193,8 +193,13 @@ class FieldPlotter:
             if hgt_data is not None:
                 # 绘制等高线
                 self._draw_micaps14_lines(ax, hgt_data)
-                # 绘制符号（H/L/W/C）
+                # 高度场符号：高压 H / 低压 L
                 self._draw_micaps14_symbols(ax, hgt_data)
+
+            # 温度场符号：暖中心 W / 冷中心 C（标注在 TMP 上）
+            tmp_data = data_dict.get("TMP")
+            if tmp_data is not None:
+                self._draw_micaps14_symbols(ax, tmp_data)
 
             # 叠加实况站点风羽
             add_wind_barbs_from_df(ax, data_dict.get("wind_df"), self.map_config)
@@ -290,9 +295,9 @@ class FieldPlotter:
             return
 
         symbol_map = {
-            60: ("H", "blue"),
+            # 60: ("H", "blue"),
             61: ("L", "red"),
-            62: ("W", "red"),
+            # 62: ("W", "red"),
             63: ("C", "blue"),
         }
 
@@ -312,8 +317,9 @@ class FieldPlotter:
                     ha="center", va="center",
                     weight="bold", zorder=100,
                 )
-            else:
-                ax.text(
-                    lon, lat, str(code),
-                    fontsize=20, ha="center", va="center", zorder=100,
-                )
+            # else:
+            #     ax.text(
+            #         lon, lat, str(code),
+            #         fontsize=20, ha="center", va="center", zorder=100,
+            #     )
+            # 不在 symbol_map 里的码（60 高压 / 62 暖中心等）直接忽略

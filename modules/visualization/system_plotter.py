@@ -189,6 +189,7 @@ PLOT_HANDLERS: Dict[str, Callable] = {
     "副热带高压": _plot_subtropical_high,
     "冷涡":       _plot_cold_vortex,
     "低空低涡":   _plot_low_level_vortex,
+    "低压中心":   _plot_low_level_vortex, 
     "低空急流":   _plot_low_level_jet,
     "切变线": _plot_shear_line,
 }

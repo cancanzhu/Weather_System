@@ -153,10 +153,21 @@ def run(
         from utils.geo_utils import calculate_quadrant
         from config.settings import MAP_CONFIG
         first_pos = vt["positions"][0]
+        first_pos = vt["positions"][0]
+        logger.info(f"象限输入: 低压中心=({first_pos['lon']:.1f},{first_pos['lat']:.1f}) "
+                    f"天津=({MAP_CONFIG.tianjin_lon},{MAP_CONFIG.tianjin_lat})")
+        first_pos = vt["positions"][0]
+        logger.info(f"[方位] 冷涡vid={vt['vortex_id']} "
+                    f"首配合低压=({first_pos['lon']:.1f},{first_pos['lat']:.1f}) → 算象限")
+        first_pos = vt["positions"][0]
+        logger.info(f"[方位] vid={vt['vortex_id']} "
+                    f"positions首点=({first_pos['lon']:.1f},{first_pos['lat']:.1f}) "
+                    f"positions点数={len(vt['positions'])}")
         quadrant = calculate_quadrant(
             first_pos["lon"], first_pos["lat"],
             MAP_CONFIG.tianjin_lon, MAP_CONFIG.tianjin_lat,
         )
+        logger.info(f"象限输出: {quadrant}")
 
         cold_vortex_analyses.append({
             "cv_num": num,
@@ -210,7 +221,21 @@ def run(
                     f"{a['from_dir']}→{a['to_dir']}, "
                     f"影响时间={a['impact_time']}")
 
-    return cold_vortex_analyses, vortex_tracks, impact_vortex_ids
+    # 参与"影响天津冷涡"（配合成功 + 落入影响范围）的低压/冷中心 track_id
+    impact_lp_ids = set(impact_vortex_ids)   # vortex_id 即 lp_track_id
+    impact_cc_ids = set()
+    for vt in vortex_tracks:
+        if vt["vortex_id"] in impact_vortex_ids:
+            for pos in vt["positions"]:
+                cid = pos.get("cc_track_id")
+                if cid is not None:
+                    impact_cc_ids.add(cid)
+
+    # 仅这些 track_id 上色，其余灰色
+    lp_plot_tracks = _build_plot_tracks(lp_tracker, impact_ids=impact_lp_ids)
+    cc_plot_tracks = _build_plot_tracks(cc_tracker, impact_ids=impact_cc_ids)
+    return cold_vortex_analyses, vortex_tracks, impact_vortex_ids, \
+        lp_plot_tracks, cc_plot_tracks
 
 
 # ================================================================
@@ -239,21 +264,30 @@ def _detect_centers_from_grid(grd, center_type: str) -> List[Dict]:
         caldata = mdgcal.high_low_center(grd)
         features = caldata.get("graphy", {}).get("features", {})
 
+        from config.settings import MAP_CONFIG
+        margin = 2.0   # 度；离绘图区边界小于此值的极值视为假中心，丢弃
+
         centers = []
         for fid, feature in features.items():
-            # 低压/冷中心都是 feature_id < 0
             if int(fid) < 0:
                 center = feature.get("center", {})
                 region = feature.get("region", {})
                 lon = center.get("lon")
                 lat = center.get("lat")
-                if lon is not None and lat is not None:
-                    centers.append({
-                        "lon": lon,
-                        "lat": lat,
-                        "value": center.get("value", 0),
-                        "strength": region.get("strength", 0),
-                    })
+                if lon is None or lat is None:
+                    continue
+                # 过滤贴近绘图区边界的假极值（温度场/高度场极小值常落在图区冷角）
+                if (lon <= MAP_CONFIG.lon_min + margin or
+                        lon >= MAP_CONFIG.lon_max - margin or
+                        lat <= MAP_CONFIG.lat_min + margin or
+                        lat >= MAP_CONFIG.lat_max - margin):
+                    continue
+                centers.append({
+                    "lon": lon,
+                    "lat": lat,
+                    "value": center.get("value", 0),
+                    "strength": region.get("strength", 0),
+                })
         return centers
 
     except Exception as e:
@@ -335,6 +369,7 @@ def _couple_and_build_tracks(
             vortex_tracks[lp_tid]["positions"].append({
                 "lon": pair["lon"],
                 "lat": pair["lat"],
+                "cc_track_id": pair["cc_track_id"],
                 "lp_value": pair["lp_value"],
                 "cc_value": pair["cc_value"],
                 "distance_km": pair["distance_km"],
@@ -400,6 +435,29 @@ def _couple_at_time(lps: List[Dict], ccs: List[Dict]) -> List[Dict]:
 
     return pairs
 
+
+def _build_plot_tracks(tracker, impact_ids=None) -> List[Dict]:
+    """
+    把追踪器的 tracks 转成绘图用轨迹。
+    is_impact = 该轨迹 track_id 是否在 impact_ids 中
+    （即是否参与了"配合成功且落入影响范围"的冷涡）。
+    """
+    impact_ids = impact_ids or set()
+    result = []
+    for track_id, items in tracker.tracks.items():
+        positions = [{
+            "lon": v["lon"],
+            "lat": v["lat"],
+            "fcst_time": v.get("fcst_time"),
+            "time_str": v.get("time_str", ""),
+        } for v in items]
+        positions.sort(key=lambda p: p.get("time_str", ""))
+        result.append({
+            "track_id": track_id,
+            "positions": positions,
+            "is_impact": track_id in impact_ids,
+        })
+    return result
 
 def _classify_vortex(vt: Dict) -> str:
     """分类冷涡为东北冷涡或蒙古冷涡"""

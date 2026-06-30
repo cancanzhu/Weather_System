@@ -30,6 +30,11 @@ class AnalysisPlotter:
         self.map_config = map_config or MAP_CONFIG
         os.makedirs(FIGURE_DIR, exist_ok=True)
 
+    def _in_extent(self, lon: float, lat: float) -> bool:
+        """判断经纬度是否在地图范围内"""
+        ext = self.map_config.extent
+        return ext[0] <= lon <= ext[1] and ext[2] <= lat <= ext[3]
+
     # ================================================================
     # 实况图：等值线底图 + 天气系统叠加
     # ================================================================
@@ -74,6 +79,10 @@ class AnalysisPlotter:
                 self._draw_obs_isolines(ax, hgt_data)
                 self._draw_obs_symbols(ax, hgt_data)
                 self._draw_obs_labels(ax, hgt_data)
+
+            tmp_data = obs_data.get("TMP")
+            if tmp_data is not None:
+                self._draw_obs_symbols(ax, tmp_data)
 
             # 叠加天气系统识别结果（按层次分派）
             self._overlay_obs_systems(ax, obs_detection, level)
@@ -159,6 +168,7 @@ class AnalysisPlotter:
                             self.map_config.lat_min <= lat <= self.map_config.lat_max):
                         ax.text(lon, lat, "L", color="red", fontsize=14,
                                 ha="center", va="center", weight="bold", zorder=100)
+            self._draw_shear_lines(ax, detection)
 
         elif level == 850:
             # 低空低涡
@@ -186,6 +196,20 @@ class AnalysisPlotter:
                     if jet_lines:
                         meb.add_curved_arrows(ax, jet_lines, color="red",
                                               linewidth=1.5, head_width=1, head_length=1)
+            self._draw_shear_lines(ax, detection)
+
+    def _draw_shear_lines(self, ax, detection: dict):
+        """绘制实况切变线（700/850hPa），紫色实线，与第一份识别报告配色一致"""
+        for item in detection.get("切变线", []):
+            geo = item.get("geometry", {})
+            if geo.get("type") != "line":
+                continue
+            points = np.array(geo.get("points", []))
+            if len(points) >= 2:
+                ax.plot(
+                    points[:, 0], points[:, 1],
+                    color="purple", linewidth=2.0, zorder=50,
+                )
 
     # ================================================================
     # 预报追踪图：地图底图 + 多时次轨迹叠加
@@ -197,8 +221,8 @@ class AnalysisPlotter:
         tianjin_track_ids: List[int],
         level: int,
         time_label: str,
-        cold_vortex_tracks: List = None,
-        cold_vortex_impact_ids: List = None,
+        cold_low_tracks: List = None,
+        cold_center_tracks: List = None,
     ) -> str:
         """
         生成预报追踪图。
@@ -235,11 +259,10 @@ class AnalysisPlotter:
             # 按层次绘制轨迹
             if level == 500:
                 self._draw_trough_tracks(ax, tracker, tianjin_track_ids)
-                if cold_vortex_tracks:
-                    self._draw_cold_vortex_tracks(
-                        ax, cold_vortex_tracks,
-                        cold_vortex_impact_ids or [],
-                    )
+                # 低压中心轨迹：影响天津=红 L，不影响=灰 L
+                self._draw_center_tracks(ax, cold_low_tracks or [], "L", "red")
+                # 冷中心轨迹：影响天津=蓝 C，不影响=灰 C
+                self._draw_center_tracks(ax, cold_center_tracks or [], "C", "blue")
             elif level in [700, 850]:
                 self._draw_vortex_tracks(ax, tracker, tianjin_track_ids)
 
@@ -366,68 +389,61 @@ class AnalysisPlotter:
                                   alpha=0.6, pad=1, linewidth=0.5),
                     )
 
-    def _draw_cold_vortex_tracks(self, ax, vortex_tracks: List[Dict],
-                                  impact_ids: List):
+    def _draw_center_tracks(self, ax, tracks: List[Dict], letter: str,
+                             impact_color: str):
+        
+        logger.info(f"{letter} 收到轨迹数: {len(tracks)}; "
+            f"各条点数: {[len(t.get('positions', [])) for t in tracks]}")
         """
-        绘制冷涡追踪轨迹。
+        绘制中心点轨迹（低压中心或冷中心，各自独立一套，互不连线）。
 
-        影响天津的：蓝色标记+轨迹线，透明度递减，标注时间
-        不影响天津的：灰色标记+轨迹线
+        影响天津：impact_color（L红 / C蓝）+ 同色虚线轨迹
+        不影响：  灰色
+        时间越晚越透明，并在标记下方标注时刻。
+
+        Args:
+            tracks:       [{"positions":[{"lon","lat","fcst_time"}], "is_impact"}, ...]
+            letter:       标记字母 "L" 或 "C"
+            impact_color: 影响天津时的颜色，如 "red" / "blue"
         """
-        if not vortex_tracks:
+        if not tracks:
             return
 
-        impact_set = set(impact_ids) if impact_ids else set()
-
-        for vt in vortex_tracks:
-            vortex_id = vt.get("vortex_id")
-            positions = vt.get("positions", [])
+        for tk in tracks:
+            positions = tk.get("positions", [])
             if not positions:
                 continue
 
-            if vortex_id in impact_set:
-                color = "blue"
-            else:
-                color = "grey"
-
+            color = impact_color if tk.get("is_impact") else "grey"
             num_pos = len(positions)
 
-            # 绘制轨迹连线
+            # 轨迹连线
             if num_pos >= 2:
                 lons = [p["lon"] for p in positions]
                 lats = [p["lat"] for p in positions]
                 ax.plot(lons, lats, color=color, linewidth=1.5,
                         linestyle="--", alpha=0.6, zorder=40)
 
-            # 绘制每个时次的冷涡中心
+            # 逐时次画字母 + 时间
             for idx, pos in enumerate(positions):
                 lon, lat = pos["lon"], pos["lat"]
-
-                if not (self.map_config.lon_min <= lon <= self.map_config.lon_max and
-                        self.map_config.lat_min <= lat <= self.map_config.lat_max):
+                logger.info(f"{letter} pt({idx}): ({lon:.1f}, {lat:.1f}) in={self._in_extent(lon, lat)}")   # 临时调试
+                if not self._in_extent(lon, lat):
                     continue
 
                 alpha = 1.0 - 0.7 * idx / max(1, num_pos - 1)
 
-                # 冷涡标记
-                ax.text(
-                    lon, lat, "C",
-                    color=color, fontsize=14, alpha=alpha,
-                    ha="center", va="center",
-                    weight="bold", zorder=100,
-                )
+                ax.text(lon, lat, letter, color=color, fontsize=14,
+                        alpha=alpha, ha="center", va="center",
+                        weight="bold", zorder=100)
 
-                # 时间标签
                 fcst_time = pos.get("fcst_time")
                 if fcst_time:
-                    time_text = f"{fcst_time.hour}时"
-                    ax.text(
-                        lon, lat - 0.8, time_text,
-                        fontsize=7, color=color, ha="center", va="center",
-                        clip_on=True, alpha=alpha,
-                        bbox=dict(facecolor="white", edgecolor=color,
-                                  alpha=0.6, pad=1, linewidth=0.5),
-                    )
+                    ax.text(lon, lat - 0.8, f"{fcst_time.hour}时",
+                            fontsize=7, color=color, ha="center", va="center",
+                            clip_on=True, alpha=alpha,
+                            bbox=dict(facecolor="white", edgecolor=color,
+                                      alpha=0.6, pad=1, linewidth=0.5))
 
     # ================================================================
     # 辅助方法：绘制 MICAPS14 等值线底图
@@ -472,9 +488,9 @@ class AnalysisPlotter:
             return
 
         symbol_map = {
-            60: ("H", "blue"),
+            # 60: ("H", "blue"),
             61: ("L", "red"),
-            62: ("W", "red"),
+            # 62: ("W", "red"),
             63: ("C", "blue"),
         }
 

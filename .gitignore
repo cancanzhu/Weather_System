@@ -5,3 +5,5 @@ output/
 .env
 .idea/
 .vscode/
+config/secrets.py
+*.csv
