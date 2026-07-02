@@ -103,7 +103,7 @@ MAP_CONFIG = MapConfig()
 TIANJIN_RANGE = {
     "lon_min": 105,
     "lon_max": 120,
-    "lat_min": 38,
+    "lat_min": 35,
     "lat_max": 45,
 }
 
@@ -210,6 +210,11 @@ COLD_VORTEX_IMPACT_REGION = {
     "lat_min": 39,
     "lat_max": 55,
 }
+
+# ── 低空急流影响判断（850hPa）──
+JET_AFFECT_DISTANCE_KM = 50.0      # 急流轴到天津矩形的最近距离阈值(km)
+JET_EXIT_ANGLE_MAX = 30.0          # 出口风向"对着"天津矩形的最大夹角(度)
+JET_CONVERGENCE_SIDE = "left"      # 辐合侧：沿流向左侧(北半球气旋式切变侧)；可改 "right"
 
 WEATHER_SYSTEM_REGISTRY: Dict[str, dict] = {
     "高空槽": {

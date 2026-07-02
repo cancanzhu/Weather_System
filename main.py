@@ -193,6 +193,12 @@ def main():
         forecast_data, fcst_detection_results, obs_detection_results,
     )
 
+    # 低空急流分析（850hPa）
+    from modules.tracking import low_level_jet_analysis
+    jet_analysis = low_level_jet_analysis.run(
+        forecast_data, fcst_detection_results, obs_detection_results, obs_data,
+    )
+
     # ══════════════════════════════════════════
     # Step 7: 生成分析报告图片 + 第二份 Word
     # ══════════════════════════════════════════
@@ -225,16 +231,19 @@ def main():
             obs_fig = analysis_plotter.plot_obs_analysis(
                 obs_data[obs_key], obs_det, level,
                 time_label=obs_time_label or "实况",
+                jet_viz=jet_analysis.get("viz") if level == 850 else None,
             )
             level_figs["obs"] = obs_fig
 
         # 预报追踪图
+        jv = jet_analysis.get("viz") if level == 850 else None
         if level == 500 and (trough_tracker.tracks or cold_lp_tracks or cold_cc_tracks):
             fcst_fig = analysis_plotter.plot_fcst_tracking(
                 trough_tracker, trough_tianjin_ids, level,
                 time_label=obs_time_label or "预报",
                 cold_low_tracks=cold_lp_tracks,
                 cold_center_tracks=cold_cc_tracks,
+                jet_viz=jv,
             )
         elif level in vortex_trackers and vortex_trackers[level].tracks:
             fcst_fig = analysis_plotter.plot_fcst_tracking(
@@ -242,11 +251,13 @@ def main():
                 vortex_tianjin_ids.get(level, []),
                 level,
                 time_label=obs_time_label or "预报",
+                jet_viz=jv,
             )
         else:
             fcst_fig = analysis_plotter.plot_fcst_tracking(
                 None, [], level,
                 time_label=obs_time_label or "预报",
+                jet_viz=jv,
             )
         level_figs["fcst_tracking"] = fcst_fig
 
@@ -263,6 +274,7 @@ def main():
         cold_vortex_analyses=cold_vortex_analyses,
         subtropical_high_analyses=subtropical_high_analyses,
         analysis_figures=analysis_figures,
+        low_level_jet_analysis=jet_analysis,
     )
     logger.info(f"分析报告已保存: {analysis_path}")
 

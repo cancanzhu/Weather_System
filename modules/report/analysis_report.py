@@ -33,6 +33,7 @@ class AnalysisReportGenerator:
         cold_vortex_analyses: List[Dict] = None,
         subtropical_high_analyses: List[Dict] = None,
         analysis_figures: Dict = None,
+        low_level_jet_analysis: Dict = None,
     ) -> str:
         """
         生成分析报告。
@@ -68,18 +69,18 @@ class AnalysisReportGenerator:
 
         # ── 一、影响天津的天气系统列表 ──
         doc.add_heading("一、未来12小时影响天津的天气系统", level=1)
-        affecting_list = self._build_affecting_list(trough_analyses, vortex_analyses, cold_vortex_analyses, subtropical_high_analyses)
+        affecting_list = self._build_affecting_list(trough_analyses, vortex_analyses, cold_vortex_analyses, subtropical_high_analyses, low_level_jet_analysis)
         self._add_styled_paragraph(doc, affecting_list)
 
         # ── 二、系统描述 ──
         doc.add_heading("二、系统描述", level=1)
 
         doc.add_heading("2.1 实况描述", level=2)
-        obs_text = self._build_obs_description(trough_analyses, vortex_analyses, cold_vortex_analyses, subtropical_high_analyses)
+        obs_text = self._build_obs_description(trough_analyses, vortex_analyses, cold_vortex_analyses, subtropical_high_analyses, low_level_jet_analysis)
         self._add_styled_paragraph(doc, obs_text)
 
         doc.add_heading("2.2 预报描述", level=2)
-        fcst_text = self._build_fcst_description(trough_analyses, vortex_analyses, cold_vortex_analyses, subtropical_high_analyses)
+        fcst_text = self._build_fcst_description(trough_analyses, vortex_analyses, cold_vortex_analyses, subtropical_high_analyses, low_level_jet_analysis)
         self._add_styled_paragraph(doc, fcst_text)
 
         # ── 三、可视化（按层次） ──
@@ -113,7 +114,8 @@ class AnalysisReportGenerator:
     def _build_affecting_list(self, trough_analyses: List[Dict],
                                vortex_analyses: List[Dict] = None,
                                cold_vortex_analyses: List[Dict] = None,
-                               subtropical_high_analyses: List[Dict] = None) -> str:
+                               subtropical_high_analyses: List[Dict] = None,
+                               low_level_jet_analysis: Dict = None) -> str:
         systems = []
 
         for a in trough_analyses:
@@ -142,6 +144,9 @@ class AnalysisReportGenerator:
                     systems.append("副热带高压")
                     break
 
+        if low_level_jet_analysis and low_level_jet_analysis.get("is_affecting"):
+            systems.append("低空急流（850hPa）")
+
         if not systems:
             return "未来12小时内无天气系统影响天津。"
 
@@ -150,7 +155,8 @@ class AnalysisReportGenerator:
     def _build_obs_description(self, trough_analyses: List[Dict],
                                 vortex_analyses: List[Dict] = None,
                                 cold_vortex_analyses: List[Dict] = None,
-                                subtropical_high_analyses: List[Dict] = None) -> str:
+                                subtropical_high_analyses: List[Dict] = None,
+                                low_level_jet_analysis: Dict = None) -> str:
         lines = []
 
         # 高空槽
@@ -187,6 +193,11 @@ class AnalysisReportGenerator:
             for a in obs_items:
                 lines.append(f"副热带高压（500hPa）：{a['description']}")
 
+        # 低空急流（第一个影响时次为实况时）
+        if (low_level_jet_analysis and low_level_jet_analysis.get("is_affecting")
+                and low_level_jet_analysis.get("first_source") == "obs"):
+            lines.append(f"低空急流（850hPa）：{low_level_jet_analysis['wording']}")
+
         if not lines:
             return "当前实况中无天气系统影响天津。"
 
@@ -195,7 +206,8 @@ class AnalysisReportGenerator:
     def _build_fcst_description(self, trough_analyses: List[Dict],
                                  vortex_analyses: List[Dict] = None,
                                  cold_vortex_analyses: List[Dict] = None,
-                                 subtropical_high_analyses: List[Dict] = None) -> str:
+                                 subtropical_high_analyses: List[Dict] = None,
+                                 low_level_jet_analysis: Dict = None) -> str:
         lines = []
         num = 1
 
@@ -239,6 +251,16 @@ class AnalysisReportGenerator:
             for a in fcst_items:
                 lines.append(f"{num}. 副热带高压（500hPa）：{a['description']}")
                 num += 1
+
+        # 低空急流（第一个影响时次为预报时）
+        if (low_level_jet_analysis and low_level_jet_analysis.get("is_affecting")
+                and low_level_jet_analysis.get("first_source") == "fcst"):
+            lines.append(
+                f"{num}. 低空急流（850hPa）："
+                f"预计{low_level_jet_analysis['impact_time']}"
+                f"{low_level_jet_analysis['wording']}"
+            )
+            num += 1
 
         if not lines:
             return "未来12小时内无天气系统影响天津。"

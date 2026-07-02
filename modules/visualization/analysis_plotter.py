@@ -45,6 +45,7 @@ class AnalysisPlotter:
         obs_detection: dict,
         level: int,
         time_label: str,
+        jet_viz: dict = None,
     ) -> str:
         """
         生成实况分析图。
@@ -85,7 +86,7 @@ class AnalysisPlotter:
                 self._draw_obs_symbols(ax, tmp_data)
 
             # 叠加天气系统识别结果（按层次分派）
-            self._overlay_obs_systems(ax, obs_detection, level)
+            self._overlay_obs_systems(ax, obs_detection, level, jet_viz)
 
             # 叠加实况站点风羽
             add_wind_barbs_from_df(ax, obs_data.get("wind_df"), self.map_config)
@@ -106,7 +107,7 @@ class AnalysisPlotter:
             plt.close("all")
             return ""
 
-    def _overlay_obs_systems(self, ax, detection: dict, level: int):
+    def _overlay_obs_systems(self, ax, detection: dict, level: int, jet_viz: dict = None):
         """
         在实况图上叠加天气系统。
         按层次分派，后续新增系统在此添加。
@@ -182,20 +183,8 @@ class AnalysisPlotter:
                         ax.text(lon, lat, "L", color="red", fontsize=14,
                                 ha="center", va="center", weight="bold", zorder=100)
 
-            # 低空急流
-            jets = detection.get("低空急流", [])
-            for item in jets:
-                geo = item.get("geometry", {})
-                if geo.get("type") == "graphy_raw":
-                    graphy = geo.get("graphy")
-                    if graphy:
-                        meb.add_curved_arrows(ax, graphy, color="red",
-                                              linewidth=1.5, head_width=1, head_length=1)
-                elif geo.get("type") == "jet_lines":
-                    jet_lines = geo.get("lines", [])
-                    if jet_lines:
-                        meb.add_curved_arrows(ax, jet_lines, color="red",
-                                              linewidth=1.5, head_width=1, head_length=1)
+            # 低空急流：只在"第一个影响时次"为实况时绘制（影响=红，不影响=灰）
+            self._draw_jet_viz(ax, jet_viz, source="obs")
             self._draw_shear_lines(ax, detection)
 
     def _draw_shear_lines(self, ax, detection: dict):
@@ -211,6 +200,24 @@ class AnalysisPlotter:
                     color="purple", linewidth=2.0, zorder=50,
                 )
 
+    def _draw_jet_viz(self, ax, jet_viz: dict, source: str):
+        """
+        绘制"第一个影响时次"的低空急流（850hPa）。
+        影响天津=红色，同时次不影响=灰色。仅当 jet_viz 来源与当前图一致时绘制。
+        """
+        if not jet_viz or jet_viz.get("source") != source:
+            return
+        for jet in jet_viz.get("jets", []):
+            axis = jet.get("axis", [])
+            if len(axis) < 2:
+                continue
+            color = "red" if jet.get("affecting") else "grey"
+            try:
+                meb.add_curved_arrows(ax, [axis], color=color,
+                                      linewidth=1.5, head_width=1, head_length=1)
+            except Exception as e:
+                logger.warning(f"急流绘制失败: {e}")
+
     # ================================================================
     # 预报追踪图：地图底图 + 多时次轨迹叠加
     # ================================================================
@@ -223,6 +230,7 @@ class AnalysisPlotter:
         time_label: str,
         cold_low_tracks: List = None,
         cold_center_tracks: List = None,
+        jet_viz: dict = None,
     ) -> str:
         """
         生成预报追踪图。
@@ -265,6 +273,9 @@ class AnalysisPlotter:
                 self._draw_center_tracks(ax, cold_center_tracks or [], "C", "blue")
             elif level in [700, 850]:
                 self._draw_vortex_tracks(ax, tracker, tianjin_track_ids)
+
+            # 低空急流：只在"第一个影响时次"为预报时绘制（影响=红，不影响=灰）
+            self._draw_jet_viz(ax, jet_viz, source="fcst")
 
             # 天津标记
             ax.plot(
