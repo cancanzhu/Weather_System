@@ -64,13 +64,17 @@ def get_location_description(
             f"请判断位于哪个省份的什么方位。"
         )
 
+    logger.info(f"[位置查询] system={system_type} center=({center_lon:.1f},{center_lat:.1f}) "
+                f"n_coords={len(coords)}")
     result = call_llm(prompt, SYSTEM_PROMPT)
 
     if result:
+        logger.info(f"[位置查询] ✓ 成功 → {result}")
         # 仅缓存成功结果；失败不缓存，避免一次网络抖动钉死整轮降级
         _location_cache[cache_key] = result
         return result
     else:
+        logger.warning(f"[位置查询] ✗ 失败 → 降级到坐标")
         # 降级：返回坐标描述
         return f"({center_lon:.1f}°E, {center_lat:.1f}°N)附近"
 

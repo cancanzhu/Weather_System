@@ -14,7 +14,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import meteva.base as meb
 from typing import Dict, List, Any, Optional
-from config.settings import MAP_CONFIG, FIGURE_DIR
+from config.settings import SHOW_NON_AFFECTING_SYSTEMS, MAP_CONFIG, FIGURE_DIR
 from modules.visualization.system_plotter import draw_ocean_land, add_wind_barbs_from_df
 
 plt.rcParams["font.sans-serif"] = ["SimHei"]
@@ -46,6 +46,9 @@ class AnalysisPlotter:
         level: int,
         time_label: str,
         jet_viz: dict = None,
+        subhigh_detection: dict = None,
+        subhigh_time_text: str = None,
+        forecast_data: dict = None,
     ) -> str:
         """
         生成实况分析图。
@@ -126,26 +129,7 @@ class AnalysisPlotter:
                         )
 
             # 副热带高压 588线：影响天津才标红，否则画深蓝
-            from config.settings import SUBTROPICAL_HIGH_LAT_THRESHOLD
-            from modules.tracking.subtropical_high_analysis import (
-                _max_lat_in_lon_window,
-            )
-            sub_highs = detection.get("副热带高压", [])
-            for item in sub_highs:
-                geo = item.get("geometry", {})
-                if geo.get("type") == "line":
-                    points = np.array(geo["points"])
-                    if len(points) >= 2:
-                        win_max_lat = _max_lat_in_lon_window(points)
-                        affecting = (
-                            not np.isnan(win_max_lat)
-                            and win_max_lat >= SUBTROPICAL_HIGH_LAT_THRESHOLD
-                        )
-                        line_color = "red" if affecting else "darkblue"
-                        ax.plot(
-                            points[:, 0], points[:, 1],
-                            color=line_color, linewidth=2.0, zorder=50,
-                        )
+            self._draw_subhigh_588(ax, detection)
 
             # 冷涡
             cold_vortex = detection.get("冷涡", [])
@@ -200,6 +184,44 @@ class AnalysisPlotter:
                     color="purple", linewidth=2.0, zorder=50,
                 )
 
+    def _draw_subhigh_588(self, ax, detection: dict, time_text: str = None):
+        """按识别结果就地绘制588线：影响天津=红，不影响=深蓝（受开关控制）。
+        每条线标注"588"；影响天津的线可附加时间标签（time_text）。"""
+        if not detection:
+            return
+        from config.settings import SUBTROPICAL_HIGH_LAT_THRESHOLD
+        from modules.tracking.subtropical_high_analysis import (
+            _max_lat_in_lon_window,
+        )
+        for item in detection.get("副热带高压", []):
+            geo = item.get("geometry", {})
+            if geo.get("type") != "line":
+                continue
+            points = np.array(geo["points"])
+            if len(points) < 2:
+                continue
+            win_max_lat = _max_lat_in_lon_window(points)
+            affecting = (not np.isnan(win_max_lat)
+                         and win_max_lat >= SUBTROPICAL_HIGH_LAT_THRESHOLD)
+            if not affecting and not SHOW_NON_AFFECTING_SYSTEMS:
+                continue          # 开关关闭时，不影响的588线不突出显示
+            color = "red" if affecting else "darkblue"
+            ax.plot(points[:, 0], points[:, 1],
+                    color=color, linewidth=2.0, zorder=50)
+
+            # 标签：与其他系统统一（线中点、8号字、白底框）
+            label = "588"
+            if affecting and time_text:
+                label = f"588 {time_text}"
+            mid_idx = len(points) // 2
+            ax.text(
+                points[mid_idx][0], points[mid_idx][1], label,
+                fontsize=8, color=color, ha="center", va="center",
+                clip_on=True,
+                bbox=dict(facecolor="white", edgecolor=color,
+                          alpha=0.8, pad=1, linewidth=0.5),
+            )
+
     def _draw_jet_viz(self, ax, jet_viz: dict, source: str):
         """
         绘制"第一个影响时次"的低空急流（850hPa）。
@@ -208,6 +230,8 @@ class AnalysisPlotter:
         if not jet_viz or jet_viz.get("source") != source:
             return
         for jet in jet_viz.get("jets", []):
+            if not jet.get("affecting") and not SHOW_NON_AFFECTING_SYSTEMS:
+                continue                      # 开关关闭时，不影响的急流不绘制
             axis = jet.get("axis", [])
             if len(axis) < 2:
                 continue
@@ -231,6 +255,9 @@ class AnalysisPlotter:
         cold_low_tracks: List = None,
         cold_center_tracks: List = None,
         jet_viz: dict = None,
+        subhigh_detection: dict = None,
+        subhigh_time_text: str = None,
+        forecast_data: dict = None,
     ) -> str:
         """
         生成预报追踪图。
@@ -244,6 +271,10 @@ class AnalysisPlotter:
         Returns:
             图片路径
         """
+        # 供低压中心等高线绘制使用的上下文
+        self._contour_fcst_data = forecast_data
+        self._contour_level = level
+
         title = f"预报追踪 {time_label} {level}hPa"
         fig_name = f"analysis_fcst_{time_label}_{level}hPa_tracking.png"
         fig_path = os.path.join(FIGURE_DIR, fig_name)
@@ -277,6 +308,9 @@ class AnalysisPlotter:
             # 低空急流：只在"第一个影响时次"为预报时绘制（影响=红，不影响=灰）
             self._draw_jet_viz(ax, jet_viz, source="fcst")
 
+            # 副热带高压588线（预报第一个影响时次，main传入该时次识别结果）
+            self._draw_subhigh_588(ax, subhigh_detection, subhigh_time_text)
+
             # 天津标记
             ax.plot(
                 self.map_config.tianjin_lon, self.map_config.tianjin_lat,
@@ -306,11 +340,9 @@ class AnalysisPlotter:
         tianjin_set = set(tianjin_track_ids) if tianjin_track_ids else set()
 
         for track_id, troughs in tracker.tracks.items():
-            # 确定颜色
-            if track_id in tianjin_set:
-                color = "brown"
-            else:
-                color = "grey"
+            if track_id not in tianjin_set and not SHOW_NON_AFFECTING_SYSTEMS:
+                continue                      # 开关关闭时，不影响的轨迹不绘制
+            color = "brown" if track_id in tianjin_set else "grey"
 
             num_troughs = len(troughs)
 
@@ -355,10 +387,9 @@ class AnalysisPlotter:
         tianjin_set = set(tianjin_track_ids) if tianjin_track_ids else set()
 
         for track_id, vortices in tracker.tracks.items():
-            if track_id in tianjin_set:
-                color = "red"
-            else:
-                color = "grey"
+            if track_id not in tianjin_set and not SHOW_NON_AFFECTING_SYSTEMS:
+                continue                      # 开关关闭时，不影响的轨迹不绘制
+            color = "red" if track_id in tianjin_set else "grey"
 
             num_vortices = len(vortices)
 
@@ -379,6 +410,18 @@ class AnalysisPlotter:
 
                 # 透明度递减
                 alpha = 1.0 - 0.7 * idx / max(1, num_vortices - 1)
+
+                # 低涡中心最近的等高线（蓝色等高线本色、透明度同本时次）
+                seg, seg_val = self._low_center_contour(v.get("fcst_time"), lon, lat)
+                if seg is not None:
+                    ax.plot(seg[:, 0], seg[:, 1], color="blue",
+                            linewidth=0.8, alpha=alpha, zorder=45)
+                    top = seg[np.argmax(seg[:, 1])]
+                    ax.text(top[0], top[1], f"{seg_val:.0f}",
+                            fontsize=7, color="blue", ha="center", va="center",
+                            alpha=alpha, clip_on=True, zorder=46,
+                            bbox=dict(facecolor="white", edgecolor="none",
+                                      alpha=0.7, pad=0.5))
 
                 # 低涡标记
                 ax.text(
@@ -421,6 +464,8 @@ class AnalysisPlotter:
             return
 
         for tk in tracks:
+            if not tk.get("is_impact") and not SHOW_NON_AFFECTING_SYSTEMS:
+                continue                      # 开关关闭时，不影响的轨迹不绘制
             positions = tk.get("positions", [])
             if not positions:
                 continue
@@ -444,6 +489,19 @@ class AnalysisPlotter:
 
                 alpha = 1.0 - 0.7 * idx / max(1, num_pos - 1)
 
+                # 低压中心(L)最近的等高线；冷中心(C)是温度中心，不配
+                if letter == "L":
+                    seg, seg_val = self._low_center_contour(pos.get("fcst_time"), lon, lat)
+                    if seg is not None:
+                        ax.plot(seg[:, 0], seg[:, 1], color="blue",
+                                linewidth=0.8, alpha=alpha, zorder=45)
+                        top = seg[np.argmax(seg[:, 1])]
+                        ax.text(top[0], top[1], f"{seg_val:.0f}",
+                                fontsize=7, color="blue", ha="center", va="center",
+                                alpha=alpha, clip_on=True, zorder=46,
+                                bbox=dict(facecolor="white", edgecolor="none",
+                                          alpha=0.7, pad=0.5))
+
                 ax.text(lon, lat, letter, color=color, fontsize=14,
                         alpha=alpha, ha="center", va="center",
                         weight="bold", zorder=100)
@@ -459,6 +517,37 @@ class AnalysisPlotter:
     # ================================================================
     # 辅助方法：绘制 MICAPS14 等值线底图
     # ================================================================
+
+    def _low_center_contour(self, fcst_time, lon0: float, lat0: float):
+        """
+        取当前图层次、指定时次的 GH 场，返回低压中心最近的一条等高线段。
+        返回 (坐标数组, 等值线数值)；找不到返回 (None, None)。
+        """
+        fcst_data = getattr(self, "_contour_fcst_data", None)
+        level = getattr(self, "_contour_level", None)
+        if not fcst_data or level is None or fcst_time is None:
+            return None, None
+        from config.settings import SMOOTH_POINTS_PLOT
+        # 找该时次的 GH 格点
+        grd = None
+        for (tl, lv), dd in fcst_data.items():
+            if lv == level and dd.get("time") == fcst_time:
+                grd = dd.get("GH")
+                break
+        if grd is None:
+            logger.info(f"[低压等高线] {level}hPa 未找到时次 {fcst_time} 的GH场")
+            return None, None
+        try:
+            grd = meb.comp.smooth(grd, SMOOTH_POINTS_PLOT)
+            g2 = grd.squeeze()
+            lons = g2["lon"].values
+            lats = g2["lat"].values
+            vals = g2.values
+        except Exception as e:
+            logger.warning(f"[低压等高线] 取场失败: {e}")
+            return None, None
+        return _nearest_contour_segment(lons, lats, vals, lon0, lat0,
+                                        interval=4.0)   # 间隔4位势什米
 
     def _draw_obs_isolines(self, ax, hgt_data: dict):
         """绘制实况等值线"""
@@ -552,3 +641,54 @@ class AnalysisPlotter:
                 clip_on=True,
                 bbox=dict(facecolor="white", edgecolor="none", alpha=0.7, pad=1),
             )
+
+def _nearest_contour_segment(lons, lats, vals, lon0, lat0,
+                             interval: float = 4.0):
+    """
+    取 (lon0,lat0) 处场值向上最近一级的等值线，返回离中心最近的一段
+    （截取中心8度以内的连续部分；闭合圈会被完整保留）。
+    返回 (坐标数组(N,2), 等值线数值) 或 (None, None)。
+    """
+    import matplotlib.pyplot as plt
+    try:
+        i = int(np.abs(np.asarray(lats) - lat0).argmin())
+        j = int(np.abs(np.asarray(lons) - lon0).argmin())
+        z0 = float(vals[i, j])
+    except Exception as e:
+        logger.info(f"[低压等高线] 中心({lon0:.1f},{lat0:.1f}) 采样场值失败: {e}")
+        return None, None
+    lev = np.ceil(z0 / interval) * interval
+    if lev <= z0 + 1e-6:
+        lev += interval
+
+    fig_tmp, ax_tmp = plt.subplots()
+    try:
+        cs = ax_tmp.contour(lons, lats, vals, levels=[lev])
+        best_seg, best_d, best_dists = None, None, None
+        for seg in cs.allsegs[0]:
+            if len(seg) < 2:
+                continue
+            d = np.hypot(seg[:, 0] - lon0, seg[:, 1] - lat0)
+            if best_d is None or float(d.min()) < best_d:
+                best_seg, best_d, best_dists = seg, float(d.min()), d
+        if best_seg is None or best_d > 5.0:      # 5度内没有等值线则不画
+            logger.info(f"[低压等高线] 中心({lon0:.1f},{lat0:.1f}) z0={z0:.1f} "
+                        f"{lev:.0f}线距中心过远(>{5.0}°)，不绘制")
+            return None, None
+        near = best_dists <= 8.0                  # 只保留中心8度以内的连续段
+        k0 = int(np.argmin(best_dists))
+        i0 = k0
+        while i0 > 0 and near[i0 - 1]:
+            i0 -= 1
+        i1 = k0
+        while i1 < len(near) - 1 and near[i1 + 1]:
+            i1 += 1
+        clipped = best_seg[i0:i1 + 1]
+        if len(clipped) < 2:
+            return None, None
+        return clipped, lev
+    except Exception as e:
+        logger.info(f"[低压等高线] 中心({lon0:.1f},{lat0:.1f}) 提取异常: {e}")
+        return None, None
+    finally:
+        plt.close(fig_tmp)

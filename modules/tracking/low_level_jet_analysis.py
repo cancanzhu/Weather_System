@@ -107,7 +107,7 @@ def run(
                 "viz": {
                     "source": "fcst",
                     "level": JET_LEVEL,
-                    "time_label": step["time_label"],
+                    "fcst_time": step["fcst_time"],
                     "jets": step["jets"],
                 },
             })
@@ -152,6 +152,7 @@ def _analyze_forecast(forecast_data: Dict, fcst_detection_results: Dict,
 
         step = _analyze_step(detection, rect, key[0])
         step["forecast_hour"] = fh
+        step["fcst_time"] = fcst_time
         step["time_desc"] = (
             f"{fcst_time.month}月{fcst_time.day}日{fcst_time.hour}时"
             if fcst_time else "未知时间"

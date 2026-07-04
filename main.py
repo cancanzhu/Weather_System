@@ -237,6 +237,18 @@ def main():
 
         # 预报追踪图
         jv = jet_analysis.get("viz") if level == 850 else None
+        shd = None   # 副高第一个影响时次(预报)的识别结果
+        if level == 500 and not any(a["type"] == "obs" and a.get("is_affecting")
+                                    for a in subtropical_high_analyses):
+            fsh = next((a for a in subtropical_high_analyses
+                        if a["type"] == "fcst" and a.get("is_affecting")), None)
+            if fsh:
+                k = next((k for k in forecast_data if k[1] == 500 and
+                          forecast_data[k].get("forecast_hour") == fsh["first_affecting_time"]), None)
+                shd = fcst_detection_results.get(k) if k else None
+        sht = None
+        if shd is not None and k and forecast_data[k].get("time"):
+            sht = f"{forecast_data[k]['time'].hour}时"   # 与其他系统时间标签格式一致
         if level == 500 and (trough_tracker.tracks or cold_lp_tracks or cold_cc_tracks):
             fcst_fig = analysis_plotter.plot_fcst_tracking(
                 trough_tracker, trough_tianjin_ids, level,
@@ -244,6 +256,9 @@ def main():
                 cold_low_tracks=cold_lp_tracks,
                 cold_center_tracks=cold_cc_tracks,
                 jet_viz=jv,
+                subhigh_detection=shd,
+                subhigh_time_text=sht,
+                forecast_data=forecast_data,
             )
         elif level in vortex_trackers and vortex_trackers[level].tracks:
             fcst_fig = analysis_plotter.plot_fcst_tracking(
@@ -252,12 +267,18 @@ def main():
                 level,
                 time_label=obs_time_label or "预报",
                 jet_viz=jv,
+                subhigh_detection=shd,
+                subhigh_time_text=sht,
+                forecast_data=forecast_data,
             )
         else:
             fcst_fig = analysis_plotter.plot_fcst_tracking(
                 None, [], level,
                 time_label=obs_time_label or "预报",
                 jet_viz=jv,
+                subhigh_detection=shd,
+                subhigh_time_text=sht,
+                forecast_data=forecast_data,
             )
         level_figs["fcst_tracking"] = fcst_fig
 

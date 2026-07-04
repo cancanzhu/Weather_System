@@ -200,9 +200,9 @@ def _analyze_single_trough(
     """分析单条已匹配的槽线（位置+前倾/后倾+移动方向+影响时间）"""
     obs_center = calculate_center(obs_item["geometry"]["points"])
 
-    # 大模型获取位置描述
-    from modules.llm.location_service import get_line_location
-    location = get_line_location(obs_item["geometry"]["points"], "高空槽")
+    # 大模型获取位置描述（用中心点查询，与低涡一致）
+    from modules.llm.location_service import get_point_location
+    location = get_point_location(obs_center[0], obs_center[1], "高空槽")
 
     # 前倾/后倾
     tilt_type = _judge_tilt(obs_item["geometry"]["points"], obs_detection_results)

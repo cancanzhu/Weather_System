@@ -91,6 +91,9 @@ class MapConfig:
     # 天津坐标（用于后续影响判断和标注）
     tianjin_lon: float = 117.2
     tianjin_lat: float = 39.13
+    # 分析报告可视化标签字体大小
+    system_label_fontsize: int = 14   # 系统标志标签（L、C 等）
+    time_label_fontsize: int = 7      # 时刻标签（08时、11时 等）
 
     @property
     def extent(self) -> list:
@@ -312,7 +315,7 @@ except ImportError:
 LLM_API_KEY = os.environ.get("DASHSCOPE_API_KEY", "") or _KEY_FROM_FILE
 
 LLM_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-LLM_MODEL = "qwen3.6-plus"
+LLM_MODEL = "qwen3.7-plus"
 LLM_ENABLED = True    # 设为 False 可关闭大模型，使用坐标代替省份
 LLM_TIMEOUT_SECONDS = 60   # 单次 API 调用超时（秒），防止网络问题卡死主流程
 
@@ -336,3 +339,8 @@ class LLMConfig:
 
 TRACKING_CONFIG = TrackingConfig()
 LLM_CONFIG = LLMConfig()
+
+# ── 可视化：是否绘制"不影响天津"的天气系统（灰色）──
+# True  = 不影响的系统用灰色画出（原始行为）
+# False = 不影响的系统直接不显示
+SHOW_NON_AFFECTING_SYSTEMS = False
